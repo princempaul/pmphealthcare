@@ -1,0 +1,47 @@
+{
+  "scan_roots": [
+    "~/Documents", "~/Desktop", "~/Developer", "~/Projects", "~/Code",
+    "~/pmp-agent", "~/Library/Mobile Documents/com~apple~CloudDocs"
+  ],
+  "scan_depth": 3,
+  "skip_dirs": ["node_modules", "Library", ".Trash", "venv", ".venv", "__pycache__", "dist", "build", "Photos Library.photoslibrary"],
+  "extra_projects": ["~/Documents/pmp-agent"],
+  "project_overrides": {
+    "pmphealthcare.ca": "Websites & SEO",
+    "pmp-portal": "Portal & tech",
+    "pmphealthcare": "Portal & tech",
+    "pmp-agent": "Operator & automation"
+  },
+  "categories": {
+    "Bluewater clinic": ["bluewater", "point edward", "jane", "janeapp", "christina st", "clinic", "fibroscan", "masld", "adhd", "occupational", "n95", "tb skin", "iron infusion", "travel health"],
+    "PMP Healthcare corp": ["pmp healthcare", "pmphealthcare", "corporate", "incorporation", "shareholder", "minute book"],
+    "Websites & SEO": ["website", "seo", "sitemap", "search console", "google business", "bing", "schema", "meta description", "cloudflare", "dns", "cname", "github pages", "html"],
+    "Portal & tech": ["supabase", "portal", "auth", "magic link", "edge function", "database", "api", "deploy", "react", "javascript"],
+    "Clinical documentation": ["np note", "narrative note", "progress note", "pcc", "emar", "resident", "medication review", "treatment plan", "orders", "ltc", "long-term care", "mrp", "doc ", "safety escalation"],
+    "Money & accounting": ["quickbooks", "invoice", "hst", "gst", "payroll", "bmo", "cibc", "line of credit", "csbfp", "loan", "tax", "rrsp", "revenue", "ar aging"],
+    "Career & income": ["job", "indeed", "locum", "resume", "cover letter", "contract", "teaching", "osce", "lambton college", "position", "interview"],
+    "Operator & automation": ["scheduled task", "trigger", "agent", "brief", "notion", "launchd", "cron", "claude code", "mcp", "syncthing", "automation"],
+    "Home & personal": ["amazon", "hydro", "car", "school bus", "family", "vacation", "house", "garden", "return"]
+  },
+  "limits": {
+    "dirty_days": 2,
+    "disk_free_pct": 15,
+    "backup_days": 3,
+    "downloads_old": 50
+  },
+  "expect_time_machine": true,
+  "expect_syncthing": true,
+  "facts": {
+    "clinic.name": {"value": "Bluewater Metabolic & Clinical Services (Inc. in legal lines only)", "category": "Bluewater clinic"},
+    "clinic.address": {"value": "Suite 206, 805 Christina St N, Point Edward, ON N7V 1A4", "category": "Bluewater clinic"},
+    "clinic.phone": {"value": "548-997-9797", "category": "Bluewater clinic"},
+    "clinic.email": {"value": "clinic@bluewatermetabolic.ca", "category": "Bluewater clinic"},
+    "clinic.hours": {"value": "Mon-Sat 7:30 am-9:00 pm, by appointment, in clinic and secure video", "category": "Bluewater clinic"},
+    "clinic.booking": {"value": "https://bluewatermetabolic.janeapp.com", "category": "Bluewater clinic"},
+    "site.bluewater": {"value": "bluewatermetabolic.ca (Cloudflare account bluewatermetabolic.ca)", "category": "Websites & SEO"},
+    "site.pmp": {"value": "pmphealthcare.ca, GitHub princempaul/pmphealthcare.ca, GitHub Pages", "category": "Websites & SEO"},
+    "site.portal": {"value": "app.pmphealthcare.ca, GitHub princempaul/pmp-portal, Supabase project pmp-portal", "category": "Portal & tech"},
+    "system.of_record": {"value": "Notion page 'PMP Operator' (Briefs + Launch board + Rules)", "category": "Operator & automation"},
+    "timezone": {"value": "America/Toronto", "category": "Operator & automation"}
+  }
+}
