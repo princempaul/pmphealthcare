@@ -415,10 +415,6 @@ def verify(con, cfg):
         con.execute("UPDATE conversations SET summary='' WHERE phi_risk=1")
         out.append(("ACTION", "PHI wall", "%d stored conversation line(s) matched an ID/date pattern. Clinical summaries were wiped; check `brain.py search redacted`." % leaks))
 
-    # the cloud half: did tonight's cloud review drop its note?
-    note = os.path.join(BASE, "inbox", "cloud-%s.md" % today())
-    if os.path.isdir(os.path.dirname(note)) and not os.path.exists(note):
-        out.append(("INFO", "Cloud", "No note from the cloud nightly review yet (it files to Notion; this is just the local copy)."))
     return out
 
 

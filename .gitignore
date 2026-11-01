@@ -3,6 +3,5 @@
 reports/
 backups/
 logs/
-inbox/
 __pycache__/
 .DS_Store

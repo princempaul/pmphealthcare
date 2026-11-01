@@ -6,7 +6,7 @@ DEST="$HOME/PMPBrain"
 AGENTS="$HOME/Library/LaunchAgents"
 
 echo "Installing PMP Brain into $DEST"
-mkdir -p "$DEST/logs" "$DEST/reports" "$DEST/backups" "$DEST/inbox" "$AGENTS"
+mkdir -p "$DEST/logs" "$DEST/reports" "$DEST/backups" "$AGENTS"
 cp "$SRC/brain/brain.py" "$DEST/brain.py"
 [ -f "$DEST/config.json" ] || cp "$SRC/brain/config.json" "$DEST/config.json"
 [ -f "$DEST/profile.md" ]  || cp "$SRC/brain/profile.md"  "$DEST/profile.md"
