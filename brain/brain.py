@@ -414,7 +414,11 @@ def verify(con, cfg):
             if age > lim.get("backup_days", 3):
                 out.append(("ACTION", "Mac", "Last Time Machine backup was %d days ago." % age))
         elif cfg.get("expect_time_machine", True):
-            out.append(("WATCH", "Mac", "Could not read a Time Machine backup date (none set up, or Full Disk Access not granted to python3)."))
+            dest = run(["tmutil", "destinationinfo"])
+            if "no destinations" in dest.lower() or not dest.strip():
+                out.append(("ACTION", "Mac", "No Time Machine backup is set up. If this iMac's drive fails, everything not on GitHub or iCloud is lost. Plug in an external drive and add it in System Settings > General > Time Machine."))
+            else:
+                out.append(("WATCH", "Mac", "Time Machine is set up but the last backup date can't be read. Give /usr/bin/python3 Full Disk Access."))
         # Syncthing between MacBook and iMac
         if cfg.get("expect_syncthing", True) and not run(["pgrep", "-x", "syncthing"]):
             out.append(("WATCH", "Mac", "Syncthing isn't running, so MacBook and iMac files aren't syncing."))
