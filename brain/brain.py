@@ -129,10 +129,24 @@ def redact(text):
 
 # ---------------------------------------------------------------- config / db
 
+def _merge(base, mine):
+    """Your config.json wins on values; lists are combined so new defaults still arrive."""
+    if isinstance(base, dict) and isinstance(mine, dict):
+        out = dict(base)
+        for k, v in mine.items():
+            out[k] = _merge(base[k], v) if k in base else v
+        return out
+    if isinstance(base, list) and isinstance(mine, list):
+        return base + [x for x in mine if x not in base]
+    return mine
+
+
 def load_config():
-    src = CONFIG if os.path.exists(CONFIG) else os.path.join(HERE, "config.json")
-    with open(src) as f:
-        cfg = json.load(f)
+    cfg = {}
+    for src in (os.path.join(BASE, "config.default.json"), os.path.join(HERE, "config.json"), CONFIG):
+        if os.path.exists(src):
+            with open(src) as f:
+                cfg = _merge(cfg, json.load(f)) if cfg else json.load(f)
     cfg["scan_roots"] = [os.path.expanduser(p) for p in cfg.get("scan_roots", [])]
     return cfg
 
@@ -369,6 +383,18 @@ def verify(con, cfg):
             out.append(("WATCH", r["category"], "%s has %d commit(s) not pushed (branch %s)." % (r["name"], r["unpushed"], r["branch"])))
         if not r["remote"]:
             out.append(("INFO", r["category"], "%s has no remote. Nothing backs it up except this Mac." % r["name"]))
+
+    # drives and folders that must be there (the Work volume)
+    for p in cfg.get("required_paths", []):
+        if not os.path.isdir(os.path.expanduser(p)):
+            out.append(("ACTION", "Mac", "%s isn't mounted or is missing, so tonight's scan skipped it. Unlock/mount the Work drive." % p))
+
+    # the _inbox lane is meant to be emptied weekly
+    inbox = "/Volumes/Work/_inbox"
+    if os.path.isdir(inbox):
+        n = len([f for f in os.listdir(inbox) if not f.startswith(".")])
+        if n > lim.get("inbox_files", 25):
+            out.append(("WATCH", "Inbox (unsorted)", "%d items sitting in /Volumes/Work/_inbox. Sort them into pmp, clinic, clinical or academic." % n))
 
     # disk
     try:

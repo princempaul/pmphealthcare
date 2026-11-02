@@ -31,8 +31,9 @@ if ! grep -q "PMPBrain/CONTEXT.md" "$HOME/.claude/CLAUDE.md"; then
 fi
 
 # Wake the iMac at 23:25 so the 23:30 run happens even if it's asleep (needs your password once).
-read -r -p "Wake the iMac every night at 23:25 for the check? [Y/n] " ans || ans=y
-if [[ "${ans:-y}" =~ ^[Yy]$ ]]; then
+if pmset -g sched 2>/dev/null | grep -q "23:25"; then
+  echo "Wake at 23:25 already set."
+elif read -r -p "Wake the iMac every night at 23:25 for the check? [Y/n] " ans && [[ "${ans:-y}" =~ ^[Yy]$ ]]; then
   sudo pmset repeat wakeorpoweron MTWRFSU 23:25:00 && echo "Wake schedule set."
 fi
 

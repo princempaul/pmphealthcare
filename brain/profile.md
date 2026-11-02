@@ -28,5 +28,10 @@ Time zone America/Toronto.
 - Notion "PMP Operator": Briefs (one page per report per day), Launch board (open items), Rules.
 - GitHub: princempaul/pmphealthcare.ca (marketing site), princempaul/pmp-portal (portal app),
   princempaul/pmphealthcare (this brain).
+- Work drive (encrypted APFS, /Volumes/Work), one folder per lane:
+  pmp (corporate, QuickBooks, contracts, tax), clinic (Bluewater launch, equipment, layouts),
+  clinical (templates and de-identified reference only), academic (teaching, evaluation),
+  claude (working rules, CLAUDE.md), _inbox (unsorted, emptied weekly). No PHI on this drive.
+- iMac health: ~/imac-health (weekly snapshot Mondays 08:05, launch agents ca.pmphealthcare.*).
 - This database: ~/PMPBrain/brain.db. Nightly report: ~/PMPBrain/reports/. Phone copy:
   iCloud Drive/PMPBrain/latest-nightly.md.
