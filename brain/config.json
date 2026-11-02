@@ -238,5 +238,15 @@
   },
   "required_paths": [
     "/Volumes/Work"
+  ],
+  "keepalive": [
+    {
+      "name": "Supabase pmp-portal",
+      "category": "Portal & tech",
+      "url": "https://rbupsgbmqhbvycfjphbf.supabase.co/auth/v1/health",
+      "headers": {
+        "apikey": "sb_publishable_3W8vUBj59OTTk3m7uPIVZw_0IW4IGsr"
+      }
+    }
   ]
 }

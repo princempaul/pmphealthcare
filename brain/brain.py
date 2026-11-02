@@ -22,6 +22,7 @@ import re
 import shutil
 import sqlite3
 import subprocess
+import urllib.request
 import sys
 
 HOME = os.path.expanduser("~")
@@ -388,6 +389,18 @@ def verify(con, cfg):
     for p in cfg.get("required_paths", []):
         if not os.path.isdir(os.path.expanduser(p)):
             out.append(("ACTION", "Mac", "%s isn't mounted or is missing, so tonight's scan skipped it. Unlock/mount the Work drive." % p))
+
+    # keep free-tier services awake and check they answer (Supabase pauses after ~7 idle days)
+    for k in cfg.get("keepalive", []):
+        try:
+            req = urllib.request.Request(k["url"], headers=k.get("headers", {}))
+            code = urllib.request.urlopen(req, timeout=20).status
+        except urllib.error.HTTPError as e:
+            code = e.code
+        except Exception:
+            code = 0
+        if code == 0 or code >= 500 or code in (402, 503, 540):
+            out.append(("ACTION", k.get("category", "Portal & tech"), "%s didn't answer (HTTP %s). It may be paused: restore it in the dashboard." % (k["name"], code or "no reply")))
 
     # the _inbox lane is meant to be emptied weekly
     inbox = "/Volumes/Work/_inbox"
