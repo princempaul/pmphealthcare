@@ -31,6 +31,9 @@ The installer:
 Then give `/usr/bin/python3` Full Disk Access (System Settings > Privacy & Security > Full Disk
 Access) so the Time Machine check can read the backup date.
 
+One-pass fix-up (update, wake check, Time Machine, clinic-site backup, Full Disk Access):
+`cd ~/pmp-brain-src && git pull -q && ./do-all.sh`
+
 To update later: `cd ~/pmp-brain-src && git pull && ./install.sh`. Your `config.json` and
 `profile.md` in `~/PMPBrain` are kept.
 
