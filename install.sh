@@ -16,21 +16,35 @@ cp "$SRC/katrina/registry.md" "$DEST/registry.md"
 # Personal Assistant Katrina: the agent itself, and a `katrina` command to start her.
 mkdir -p "$HOME/.claude/agents" "$DEST/bin"
 cp "$SRC/.claude/agents/katrina.md" "$HOME/.claude/agents/katrina.md"
-printf '#!/bin/bash\nexec claude --agent katrina "$@"\n' > "$DEST/bin/katrina"
+cat > "$DEST/bin/katrina" <<'KAT'
+#!/bin/bash
+# Start Personal Assistant Katrina. Finds Claude Code wherever it was installed.
+for c in "$(command -v claude 2>/dev/null)" "$HOME/.local/bin/claude" "$HOME/.claude/local/claude" /opt/homebrew/bin/claude /usr/local/bin/claude; do
+  [ -n "$c" ] && [ -x "$c" ] && exec "$c" --agent katrina "$@"
+done
+echo "Claude Code isn't installed on this Mac yet. Install it with:"
+echo "  curl -fsSL https://claude.ai/install.sh | bash"
+echo "then type katrina again."
+exit 1
+KAT
 chmod +x "$DEST/bin/katrina"
 touch "$HOME/.zshrc"
 grep -q "PMPBrain/bin/katrina" "$HOME/.zshrc" || printf '\nalias katrina="$HOME/PMPBrain/bin/katrina"  # Personal Assistant Katrina\n' >> "$HOME/.zshrc"
-echo "Katrina installed. Open a new Terminal window and type: katrina"
+if command -v claude >/dev/null 2>&1 || [ -x "$HOME/.local/bin/claude" ]; then
+  echo "Katrina installed. Open a new Terminal window and type: katrina"
+else
+  echo "Katrina installed, but Claude Code isn't on this Mac yet. Run: curl -fsSL https://claude.ai/install.sh | bash"
+fi
 chmod +x "$DEST/brain.py"
 /usr/bin/python3 "$DEST/brain.py" init
 
-for name in nightly morning; do
+for name in nightly morning quick; do
   plist="$AGENTS/com.pmphealthcare.brain.$name.plist"
   sed "s#__HOME__#$HOME#g" "$SRC/launchd/com.pmphealthcare.brain.$name.plist" > "$plist"
   launchctl bootout "gui/$(id -u)" "$plist" 2>/dev/null || true
   launchctl bootstrap "gui/$(id -u)" "$plist"
 done
-echo "Scheduled: nightly 23:30, morning notification 06:30"
+echo "Scheduled: nightly 23:30, morning notification 06:30, quick update every hour"
 
 # Every future Claude Code session on this Mac loads the brain's context.
 mkdir -p "$HOME/.claude"

@@ -14,6 +14,8 @@ macOS /usr/bin/python3).
   brain.py machines      which Macs have checked in, and when
   brain.py note TOPIC TEXT   keep a decision or fact; it reaches the other Mac
   brain.py sync          swap snapshots with the other Mac now
+  brain.py quick         hourly refresh (launchd): git state, new conversations, map, CONTEXT.md
+  brain.py open          everything that needs attention on both Macs, in a few lines
 
 Nothing here sends email or posts. It reads local files and writes into
 ~/PMPBrain, plus a small snapshot (project list, git state, alerts, notes; no
@@ -41,6 +43,7 @@ CONFIG = os.path.join(BASE, "config.json")
 REPORTS = os.path.join(BASE, "reports")
 BACKUPS = os.path.join(BASE, "backups")
 CONTEXT = os.path.join(BASE, "CONTEXT.md")
+FULL = os.path.join(BASE, "FULL.md")
 ICLOUD = os.path.join(HOME, "Library", "Mobile Documents", "com~apple~CloudDocs")
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -826,9 +829,9 @@ def verify(con, cfg):
 
 # ---------------------------------------------------------------- outputs
 
-def write_context(con, cfg):
-    """CONTEXT.md is what every future Claude Code session on this Mac reads first."""
-    L = ["# PMP Brain context for %s (auto-generated %s, do not edit; edit config.json or profile.md)"
+def write_full(con, cfg):
+    """FULL.md is the long version: every path, both Macs, 60 conversations. Read on demand, never auto-loaded."""
+    L = ["# PMP Brain, full listing for %s (auto-generated %s, do not edit; edit config.json or profile.md)"
          % (machine_name(), now().strftime("%Y-%m-%d %H:%M")), ""]
     prof = os.path.join(BASE, "profile.md")
     if os.path.exists(prof):
@@ -885,8 +888,78 @@ def write_context(con, cfg):
           "- Before changing anything shared, run `python3 ~/PMPBrain/brain.py xref <name>` and check each project it lists.",
           "- Keep a decision with `python3 ~/PMPBrain/brain.py note <topic> <text>`. It reaches the other Mac.",
           "- The database never holds patient details. Keep it that way."]
-    with open(CONTEXT, "w") as f:
+    with open(FULL, "w") as f:
         f.write("\n".join(L) + "\n")
+
+
+def write_context(con, cfg):
+    """CONTEXT.md is loaded into every Claude Code session on this Mac, so every line costs tokens
+    in every session. It holds only what changes an answer: rules, what's open, the map, and how to
+    look up the rest. Paths, the other Mac's full list and old conversations live in FULL.md and
+    the database."""
+    budget = cfg.get("limits", {}).get("context_chars", 6000)
+    head = ["# PMP Brain context for %s (auto-generated %s; edit profile.md or config.json, not this)"
+            % (machine_name(), now().strftime("%Y-%m-%d %H:%M")), ""]
+    prof = os.path.join(BASE, "profile.md")
+    if os.path.exists(prof):
+        with open(prof) as f:
+            head += [f.read().strip(), ""]
+
+    opened = ["## Open now", ""]
+    for r in con.execute("SELECT * FROM alerts WHERE resolved=0 AND level IN ('ACTION','WATCH') ORDER BY level"):
+        opened.append("- %s %s: %s" % (r["level"], r["area"], r["message"]))
+    for p in con.execute("SELECT * FROM peers ORDER BY machine"):
+        for a in json.loads(p["alerts"] or "[]"):
+            opened.append("- %s on %s: %s" % (str(a.get("level", ""))[:6], p["machine"], redact(str(a.get("message", "")))[:200]))
+    if len(opened) == 2:
+        opened.append("- Nothing. Last night's check was clean.")
+
+    proj = ["", "## Projects (name only; `xref <name>` gives path, branch, state and ties)", ""]
+    cats = {}
+    for r in con.execute("SELECT name, category, dirty_files, unpushed FROM projects WHERE active=1 ORDER BY category, name"):
+        loose = r["dirty_files"] or (r["unpushed"] and r["unpushed"] > 0)
+        cats.setdefault(r["category"], []).append(r["name"] + ("*" if loose else ""))
+    here = {n.rstrip("*") for v in cats.values() for n in v}
+    for r in con.execute("SELECT machine, name, category, dirty_files, unpushed FROM peer_projects ORDER BY name"):
+        loose = r["dirty_files"] or (r["unpushed"] and r["unpushed"] > 0)
+        if r["name"] not in here or loose:
+            cats.setdefault(r["category"], []).append("%s%s (%s)" % (r["name"], "*" if loose else "", r["machine"]))
+    proj += ["- %s: %s" % (c, ", ".join(v)) for c, v in sorted(cats.items())]
+    proj.append("`*` = uncommitted or unpushed work. A name with a Mac in brackets is on the other Mac.")
+
+    users = resource_users(con)
+    names = {r["id"]: r["name"] for r in con.execute("SELECT * FROM resources")}
+    links = ["", "## How the projects connect (shared pieces only)", ""]
+    for rid, us in sorted(users.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        if rid in names and len(us) > 1:
+            links.append("- %s: %s" % (names[rid], ", ".join(us)))
+    for r in con.execute("SELECT * FROM links WHERE kind!='mentions' ORDER BY src, dst"):
+        links.append("- %s -> %s: %s" % (r["src"], r["dst"], r["kind"]))
+
+    recent = []
+    notes = con.execute("SELECT * FROM notes ORDER BY created DESC LIMIT 8").fetchall()
+    if notes:
+        recent += ["", "## Latest decisions", ""] + ["- %s [%s] %s" % (n["created"][:10], n["topic"], n["text"][:160]) for n in notes]
+    convs = con.execute("SELECT * FROM conversations ORDER BY ended DESC LIMIT 6").fetchall()
+    if convs:
+        recent += ["", "## Latest conversations", ""] + ["- %s [%s] %s" % ((c["ended"] or "")[:10], c["category"], (c["title"] or "untitled")[:80]) for c in convs]
+
+    tail = ["", "## Look it up, don't guess and don't re-read files (each is one short command)", "",
+            "- `python3 ~/PMPBrain/brain.py xref <name>`: one project or service, everything tied to it. Run before changing anything shared.",
+            "- `python3 ~/PMPBrain/brain.py search <words>`: projects, conversations, facts, notes, both Macs.",
+            "- `python3 ~/PMPBrain/brain.py open`: everything open right now, both Macs.",
+            "- `python3 ~/PMPBrain/brain.py note <topic> <text>`: keep a decision so no session has to work it out again.",
+            "- `~/PMPBrain/FULL.md`: every path and 60 conversations. `~/PMPBrain/registry.md`: the cloud side. Read only when needed.",
+            "- The database never holds patient details. Keep it that way."]
+    # stay inside the budget: drop the least useful block first, never the rules or what's open
+    blocks = [head, opened, proj, links, recent, tail]
+    for drop in (4, 3):
+        if sum(len(l) + 1 for b in blocks for l in b) <= budget:
+            break
+        blocks[drop] = ["", "(%s left out to keep this short; see FULL.md)" % ("recent items" if drop == 4 else "the map")]
+    with open(CONTEXT, "w") as f:
+        f.write("\n".join(l for b in blocks for l in b) + "\n")
+    write_full(con, cfg)
 
 
 def write_report(con, alerts, counts):
@@ -1118,6 +1191,41 @@ def cmd_machines():
     print("Shared folder:", shared_dir(cfg) or "none (iCloud Drive is off)")
 
 
+def cmd_quick():
+    """Hourly refresh: git state, new conversations, cross-references, the other Mac, search, CONTEXT.md.
+    No health checks, no report, no backup. Unchanged projects are skipped, so it takes about a second."""
+    cfg = load_config()
+    con = connect()
+    sync_facts(con, cfg)
+    n = sync_projects(con, cfg)
+    new = sync_conversations(con, cfg)
+    sync_refs(con, cfg)
+    import_peers(con, cfg)
+    export_snapshot(con, cfg)
+    build_search(con)
+    con.execute("INSERT OR REPLACE INTO meta VALUES ('quick', ?)", (now().isoformat(),))
+    con.commit()
+    write_context(con, cfg)
+    print("Quick update: %d projects, %d new conversation(s)." % (n, new))
+
+
+def cmd_open():
+    """Everything that needs attention, in as few lines as possible."""
+    con = connect()
+    rows = ["%s %s: %s" % (r["level"], r["area"], r["message"]) for r in con.execute(
+        "SELECT * FROM alerts WHERE resolved=0 AND level IN ('ACTION','WATCH') ORDER BY level")]
+    for r in con.execute("SELECT * FROM projects WHERE active=1 AND kind='git' AND (dirty_files>0 OR unpushed>0)"):
+        rows.append("LOOSE %s: %d uncommitted, %d unpushed (%s)" % (r["name"], r["dirty_files"] or 0, max(r["unpushed"] or 0, 0), r["path"].replace(HOME, "~")))
+    for p in con.execute("SELECT * FROM peers ORDER BY machine"):
+        for a in json.loads(p["alerts"] or "[]"):
+            rows.append("%s on %s: %s" % (str(a.get("level", ""))[:6], p["machine"], redact(str(a.get("message", "")))[:200]))
+        for r in con.execute("SELECT * FROM peer_projects WHERE machine=? AND (dirty_files>0 OR unpushed>0)", (p["machine"],)):
+            rows.append("LOOSE on %s, %s: %d uncommitted, %d unpushed" % (p["machine"], r["name"], r["dirty_files"] or 0, max(r["unpushed"] or 0, 0)))
+    q = con.execute("SELECT value FROM meta WHERE key='quick'").fetchone()
+    print("\n".join(rows) if rows else "Nothing open on either Mac.")
+    print("(as of %s)" % (q[0] if q else "last nightly run"))
+
+
 def cmd_sync():
     cfg = load_config()
     con = connect()
@@ -1160,6 +1268,10 @@ def main(argv):
         cmd_search(" ".join(argv[2:]))
     elif c == "xref":
         cmd_xref(" ".join(argv[2:]))
+    elif c == "quick":
+        cmd_quick()
+    elif c == "open":
+        cmd_open()
     elif c == "machines":
         cmd_machines()
     elif c == "sync":

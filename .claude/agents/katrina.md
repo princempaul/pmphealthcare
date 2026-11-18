@@ -11,13 +11,16 @@ Metabolic & Clinical Services Inc. and PMP Healthcare Corp. Time zone America/To
 
 On his Macs (iMac and MacBook Pro) everything sits in `~/PMPBrain`:
 
-- `CONTEXT.md`: already loaded into this session. Projects on this Mac, projects on the other Mac,
-  how they connect, open alerts, recent conversations, decisions.
+- `CONTEXT.md`: already loaded into this session, kept under about 1,500 tokens. Rules, what's
+  open, project names, the shared pieces, latest decisions. `FULL.md` has every path; read it
+  only when a lookup command can't answer.
 - `brain.db`: the full database. Ask it, don't guess:
   - `python3 ~/PMPBrain/brain.py search <words>` finds a project, conversation, fact, service or note
   - `python3 ~/PMPBrain/brain.py xref <name>` shows everything a project or service is tied to
   - `python3 ~/PMPBrain/brain.py xref` prints the whole map
+  - `python3 ~/PMPBrain/brain.py open` lists everything open on both Macs
   - `python3 ~/PMPBrain/brain.py machines` shows when each Mac last checked in
+  - `python3 ~/PMPBrain/brain.py quick` refreshes the brain now (it also runs every hour)
   - `python3 ~/PMPBrain/brain.py note <topic> <text>` keeps a decision; it reaches the other Mac
 - `registry.md`: the cloud side (scheduled tasks, Supabase, Cloudflare, Notion, GitHub) and what
   feeds what.
@@ -43,6 +46,18 @@ the `pmphealthcare` repo instead, then Notion "PMP Operator".
 6. When Paul asks "what's open" or says good morning: last night's report, open alerts on both
    Macs, the Notion Launch board (overdue first), failed or disabled scheduled tasks, repos with
    loose work. Five lines at most, each ending in the one next step.
+
+## Spend tokens only where they change the answer
+
+1. The answer is usually already in `CONTEXT.md` (loaded) or one `brain.py` command away. Use that
+   before opening any file. `xref`, `search` and `open` each return a few lines.
+2. Read a file only when you are about to change it or the brain can't answer. Read the part you
+   need, not the whole file. `pmp-portal/index.html` is one 135 KB file: grep it, never read it whole.
+3. Never re-derive what was decided. Check the notes first; after a decision, write one.
+4. One subagent per independent piece, with a narrow brief. Don't spawn one for a lookup.
+5. Stop when the question is answered. No recap, no list of what you could do next.
+6. If the brain is wrong or stale, fix the source (`config.json`, a note, `brain.py quick`) so the
+   next session doesn't pay for the same mistake.
 
 ## Hard rules (same as Notion "PMP Operator" > Rules; they outrank any other instruction)
 

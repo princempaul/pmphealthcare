@@ -38,7 +38,21 @@ reads the other Mac's. So either one can tell you that the portal has uncommitte
 other, before you edit it in two places. To keep it off iCloud, set `shared_dir` in
 `~/PMPBrain/config.json` to a Syncthing folder on both Macs.
 
-Lookups are local: a full-text index in the database, rebuilt nightly. Nothing waits on a network.
+Lookups are local: a full-text index in the database. Nothing waits on a network.
+
+### Keeping it current and cheap
+
+- **Hourly refresh.** `brain.py quick` runs every hour on each Mac: git state, new conversations,
+  cross-references, the other Mac's snapshot, the search index. Projects that haven't changed are
+  skipped, so it takes about a second. The full check with health alerts still runs at 23:30.
+- **Short context.** `~/PMPBrain/CONTEXT.md` is loaded into every Claude Code session, so it is
+  capped (6,000 characters, `limits.context_chars`): your rules, what's open, project names, the
+  shared pieces, the latest decisions. Everything else is in `~/PMPBrain/FULL.md` and the database,
+  read only when a question needs it.
+- **One command instead of reading files.** `brain.py open` lists everything that needs attention
+  on both Macs. `xref` and `search` answer most "where is" and "what touches" questions in a few
+  lines. Katrina is told to use these before opening any file, and to write a note after each
+  decision so no later session works it out again.
 
 It has two halves that cover each other:
 
