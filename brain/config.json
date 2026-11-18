@@ -44,7 +44,10 @@
     "Claude": "Operator & automation",
     "_inbox": "Inbox (unsorted)",
     "imac-health": "Operator & automation",
-    "pmp-brain-src": "Operator & automation"
+    "pmp-brain-src": "Operator & automation",
+    "clinic-site": "Websites & SEO",
+    "bluewater-clinic-site": "Websites & SEO",
+    "bluewatermetabolic": "Websites & SEO"
   },
   "categories": {
     "Bluewater clinic": [
@@ -186,7 +189,8 @@
     "disk_free_pct": 15,
     "backup_days": 3,
     "downloads_old": 50,
-    "inbox_files": 25
+    "inbox_files": 25,
+    "peer_days": 4
   },
   "expect_time_machine": true,
   "expect_syncthing": true,
@@ -234,6 +238,14 @@
     "timezone": {
       "value": "America/Toronto",
       "category": "Operator & automation"
+    },
+    "machines": {
+      "value": "iMac (Admins-iMac, always on, has the Work drive) and MacBook Pro. Each runs PMP Brain; they swap snapshots through iCloud Drive/PMPBrain/machines.",
+      "category": "Operator & automation"
+    },
+    "assistant": {
+      "value": "Personal Assistant Katrina: ~/.claude/agents/katrina.md on both Macs. Start with the `katrina` command.",
+      "category": "Operator & automation"
     }
   },
   "required_paths": [
@@ -247,6 +259,271 @@
       "headers": {
         "apikey": "sb_publishable_3W8vUBj59OTTk3m7uPIVZw_0IW4IGsr"
       }
+    }
+  ],
+  "laptop_overrides": {
+    "required_paths": []
+  },
+  "shared_dir": "",
+  "xref_skip_projects": [
+    "pmphealthcare",
+    "pmp-brain-src",
+    "PMPBrain",
+    "claude",
+    "Claude"
+  ],
+  "resources": [
+    {
+      "id": "supabase:pmp-portal",
+      "name": "Supabase project pmp-portal",
+      "type": "Supabase",
+      "category": "Portal & tech",
+      "patterns": [
+        "rbupsgbmqhbvycfjphbf"
+      ],
+      "note": "ca-central-1. Free tier pauses after about 7 idle days; the nightly ping keeps it awake."
+    },
+    {
+      "id": "fn:web-request",
+      "name": "Edge function web-request",
+      "type": "Supabase function",
+      "category": "Portal & tech",
+      "patterns": [
+        "functions/v1/web-request",
+        "\\bweb-request\\b"
+      ],
+      "note": "Public booking intake. No sign-in needed to call it."
+    },
+    {
+      "id": "fn:secure-message",
+      "name": "Edge functions secure-message-send / secure-message-access",
+      "type": "Supabase function",
+      "category": "Portal & tech",
+      "patterns": [
+        "secure-message-(send|access)"
+      ],
+      "note": "Secure messages between clinician and patient."
+    },
+    {
+      "id": "fn:send-fax",
+      "name": "Edge function send-fax",
+      "type": "Supabase function",
+      "category": "Portal & tech",
+      "patterns": [
+        "\\bsend-fax\\b"
+      ],
+      "note": ""
+    },
+    {
+      "id": "fn:create-video-room",
+      "name": "Edge function create-video-room",
+      "type": "Supabase function",
+      "category": "Portal & tech",
+      "patterns": [
+        "create-video-room"
+      ],
+      "note": "Pairs with Jitsi video."
+    },
+    {
+      "id": "video:jitsi",
+      "name": "Jitsi video (meet.jit.si)",
+      "type": "Video",
+      "category": "Portal & tech",
+      "patterns": [
+        "meet\\.jit\\.si"
+      ],
+      "note": ""
+    },
+    {
+      "id": "domain:pmphealthcare.ca",
+      "name": "pmphealthcare.ca",
+      "type": "Domain",
+      "category": "Websites & SEO",
+      "patterns": [
+        "(?<![\\w.-])pmphealthcare\\.ca"
+      ],
+      "note": "GitHub Pages from princempaul/pmphealthcare.ca, branch main. Also the clinic@ email domain."
+    },
+    {
+      "id": "domain:app.pmphealthcare.ca",
+      "name": "app.pmphealthcare.ca",
+      "type": "Domain",
+      "category": "Portal & tech",
+      "patterns": [
+        "app\\.pmphealthcare\\.ca"
+      ],
+      "note": "GitHub Pages from princempaul/pmp-portal, branch main."
+    },
+    {
+      "id": "domain:bluewatermetabolic.ca",
+      "name": "bluewatermetabolic.ca",
+      "type": "Domain",
+      "category": "Websites & SEO",
+      "patterns": [
+        "(?<![\\w.-])bluewatermetabolic\\.ca"
+      ],
+      "note": "Clinic site, Cloudflare account bluewatermetabolic.ca."
+    },
+    {
+      "id": "domain:team.bluewatermetabolic.ca",
+      "name": "team.bluewatermetabolic.ca",
+      "type": "Domain",
+      "category": "Operator & automation",
+      "patterns": [
+        "team\\.bluewatermetabolic\\.ca"
+      ],
+      "note": "Team app. Staff alerts come from the D1 database bluewater-ops."
+    },
+    {
+      "id": "jane",
+      "name": "Jane booking (bluewatermetabolic.janeapp.com)",
+      "type": "Booking",
+      "category": "Bluewater clinic",
+      "patterns": [
+        "janeapp\\.com"
+      ],
+      "note": ""
+    },
+    {
+      "id": "d1:bluewater-ops",
+      "name": "Cloudflare D1 bluewater-ops",
+      "type": "Cloudflare D1",
+      "category": "Operator & automation",
+      "patterns": [
+        "bluewater-ops"
+      ],
+      "note": "Filled by the 'Team app relay' scheduled task."
+    },
+    {
+      "id": "d1:bluewater-voice",
+      "name": "Cloudflare D1 bluewater-voice",
+      "type": "Cloudflare D1",
+      "category": "Operator & automation",
+      "patterns": [
+        "bluewater-voice"
+      ],
+      "note": ""
+    },
+    {
+      "id": "cloudflare",
+      "name": "Cloudflare",
+      "type": "DNS / hosting",
+      "category": "Websites & SEO",
+      "patterns": [
+        "cloudflare(?!\\.com/ajax)",
+        "wrangler"
+      ],
+      "note": ""
+    },
+    {
+      "id": "github-pages",
+      "name": "GitHub Pages",
+      "type": "Hosting",
+      "category": "Websites & SEO",
+      "patterns": [
+        "github pages",
+        "github\\.io"
+      ],
+      "note": ""
+    },
+    {
+      "id": "notion:pmp-operator",
+      "name": "Notion PMP Operator",
+      "type": "Notion",
+      "category": "Operator & automation",
+      "patterns": [
+        "PMP Operator"
+      ],
+      "note": "System of record: Briefs, Launch board, Project & conversation index, Rules."
+    },
+    {
+      "id": "quickbooks",
+      "name": "QuickBooks",
+      "type": "Accounting",
+      "category": "Money & accounting",
+      "patterns": [
+        "quickbooks",
+        "\\bqbo\\b"
+      ],
+      "note": ""
+    },
+    {
+      "id": "syncthing",
+      "name": "Syncthing (iMac <-> MacBook)",
+      "type": "Sync",
+      "category": "Operator & automation",
+      "patterns": [
+        "syncthing"
+      ],
+      "note": ""
+    },
+    {
+      "id": "search-console",
+      "name": "Google Search Console / Business Profile",
+      "type": "SEO",
+      "category": "Websites & SEO",
+      "patterns": [
+        "search console",
+        "google-site-verification",
+        "business profile"
+      ],
+      "note": ""
+    }
+  ],
+  "links": [
+    {
+      "from": "pmphealthcare.ca",
+      "to": "pmp-portal",
+      "kind": "sends booking requests to",
+      "note": "form posts to edge function web-request; the portal shows them. Falls back to email if Supabase is down"
+    },
+    {
+      "from": "pmp-portal",
+      "to": "Supabase project pmp-portal",
+      "kind": "runs on",
+      "note": "sign-in, data and all 5 edge functions"
+    },
+    {
+      "from": "pmphealthcare",
+      "to": "Supabase project pmp-portal",
+      "kind": "keeps awake",
+      "note": "nightly ping from the iMac"
+    },
+    {
+      "from": "pmphealthcare",
+      "to": "Notion PMP Operator",
+      "kind": "local twin of",
+      "note": "brain.db mirrors the Project & conversation index"
+    },
+    {
+      "from": "clinic-site",
+      "to": "bluewatermetabolic.ca",
+      "kind": "is the source of",
+      "note": "backed up to private repo princempaul/bluewater-clinic-site"
+    },
+    {
+      "from": "bluewatermetabolic.ca",
+      "to": "Jane booking (bluewatermetabolic.janeapp.com)",
+      "kind": "books through",
+      "note": ""
+    },
+    {
+      "from": "Team app relay (scheduled task)",
+      "to": "Cloudflare D1 bluewater-ops",
+      "kind": "writes to",
+      "note": "then calls team.bluewatermetabolic.ca to notify staff"
+    },
+    {
+      "from": "Nightly review (scheduled task)",
+      "to": "pmphealthcare",
+      "kind": "reads its prompt from",
+      "note": "cloud/nightly-review-prompt.md"
+    },
+    {
+      "from": "Daily operator brief (scheduled task)",
+      "to": "Notion PMP Operator",
+      "kind": "reads and files into",
+      "note": "reads last night's review, the index and the Launch board"
     }
   ]
 }

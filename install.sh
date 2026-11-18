@@ -11,6 +11,16 @@ cp "$SRC/brain/brain.py" "$DEST/brain.py"
 [ -f "$DEST/config.json" ] || cp "$SRC/brain/config.json" "$DEST/config.json"
 [ -f "$DEST/profile.md" ]  || cp "$SRC/brain/profile.md"  "$DEST/profile.md"
 cp "$SRC/brain/config.json" "$DEST/config.default.json"
+cp "$SRC/katrina/registry.md" "$DEST/registry.md"
+
+# Personal Assistant Katrina: the agent itself, and a `katrina` command to start her.
+mkdir -p "$HOME/.claude/agents" "$DEST/bin"
+cp "$SRC/.claude/agents/katrina.md" "$HOME/.claude/agents/katrina.md"
+printf '#!/bin/bash\nexec claude --agent katrina "$@"\n' > "$DEST/bin/katrina"
+chmod +x "$DEST/bin/katrina"
+touch "$HOME/.zshrc"
+grep -q "PMPBrain/bin/katrina" "$HOME/.zshrc" || printf '\nalias katrina="$HOME/PMPBrain/bin/katrina"  # Personal Assistant Katrina\n' >> "$HOME/.zshrc"
+echo "Katrina installed. Open a new Terminal window and type: katrina"
 chmod +x "$DEST/brain.py"
 /usr/bin/python3 "$DEST/brain.py" init
 
@@ -31,7 +41,10 @@ if ! grep -q "PMPBrain/CONTEXT.md" "$HOME/.claude/CLAUDE.md"; then
 fi
 
 # Wake the iMac at 23:25 so the 23:30 run happens even if it's asleep (needs your password once).
-if pmset -g sched 2>/dev/null | grep -qiE "23:25|11:25 ?PM"; then
+# A MacBook is skipped: it runs the check the next time the lid opens.
+if pmset -g batt 2>/dev/null | grep -q InternalBattery; then
+  echo "MacBook: no wake schedule. The check runs when it's next awake."
+elif pmset -g sched 2>/dev/null | grep -qiE "23:25|11:25 ?PM"; then
   echo "Wake at 23:25 already set."
 elif read -r -p "Wake the iMac every night at 23:25 for the check? [Y/n] " ans && [[ "${ans:-y}" =~ ^[Yy]$ ]]; then
   sudo pmset repeat wakeorpoweron MTWRFSU 23:25:00 && echo "Wake schedule set."
@@ -40,6 +53,7 @@ fi
 echo "Running the first check now (takes under a minute)..."
 /usr/bin/python3 "$DEST/brain.py" nightly
 /usr/bin/python3 "$DEST/brain.py" status
+/usr/bin/python3 "$DEST/brain.py" machines
 echo
 echo "Done. Tonight's report: $DEST/reports/. Phone copy: iCloud Drive > PMPBrain > latest-nightly.md"
 echo "Tip: give /usr/bin/python3 Full Disk Access (System Settings > Privacy & Security) so the Time Machine check works."

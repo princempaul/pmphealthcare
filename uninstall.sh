@@ -6,4 +6,6 @@ for name in nightly morning; do
   rm -f "$plist"
 done
 sed -i '' '/PMP Brain (auto-updated nightly)/d;/PMPBrain\/CONTEXT.md/d' "$HOME/.claude/CLAUDE.md" 2>/dev/null || true
+rm -f "$HOME/.claude/agents/katrina.md"
+sed -i '' '/PMPBrain\/bin\/katrina/d' "$HOME/.zshrc" 2>/dev/null || true
 echo "PMP Brain schedule removed. Database left at ~/PMPBrain."
