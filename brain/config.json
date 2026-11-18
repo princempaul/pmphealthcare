@@ -190,7 +190,8 @@
     "backup_days": 3,
     "downloads_old": 50,
     "inbox_files": 25,
-    "peer_days": 4
+    "peer_days": 4,
+    "context_chars": 6000
   },
   "expect_time_machine": true,
   "expect_syncthing": true,

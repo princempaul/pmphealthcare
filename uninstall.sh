@@ -1,6 +1,6 @@
 #!/bin/bash
 # Stops the schedule. Keeps ~/PMPBrain (your database) unless you delete it yourself.
-for name in nightly morning; do
+for name in nightly morning quick; do
   plist="$HOME/Library/LaunchAgents/com.pmphealthcare.brain.$name.plist"
   launchctl bootout "gui/$(id -u)" "$plist" 2>/dev/null || true
   rm -f "$plist"
