@@ -1,25 +1,34 @@
 #!/usr/bin/env python3
 """PMP Brain: one local database of Paul's projects and Claude conversations.
+It is the memory behind Personal Assistant Katrina (.claude/agents/katrina.md).
 
-Runs on the iMac. Standard library only (works with the macOS /usr/bin/python3).
+Runs on the iMac and the MacBook Pro. Standard library only (works with the
+macOS /usr/bin/python3).
 
-  brain.py init       create ~/PMPBrain and the database
-  brain.py nightly    scan, categorize, verify, write report + CONTEXT.md (launchd, 23:30)
-  brain.py brief      morning brief from last night's run (launchd, 06:30)
-  brain.py status     print what's in the database
-  brain.py search X   search projects and conversations
+  brain.py init          create ~/PMPBrain and the database
+  brain.py nightly       scan, cross-reference, verify, write report + CONTEXT.md (launchd, 23:30)
+  brain.py brief         morning brief from last night's run (launchd, 06:30)
+  brain.py status        print what's in the database
+  brain.py search X      search projects, conversations, facts, notes (both Macs)
+  brain.py xref [NAME]   what a project or service is connected to; no name = the whole map
+  brain.py machines      which Macs have checked in, and when
+  brain.py note TOPIC TEXT   keep a decision or fact; it reaches the other Mac
+  brain.py sync          swap snapshots with the other Mac now
 
-Nothing here sends email, posts, or calls an outside service. It reads local
-files and writes into ~/PMPBrain only (plus one import line in ~/.claude/CLAUDE.md
-that install.sh adds).
+Nothing here sends email or posts. It reads local files and writes into
+~/PMPBrain, plus a small snapshot (project list, git state, alerts, notes; no
+conversation text) in iCloud Drive/PMPBrain/machines so the two Macs see each
+other. The only network call is the keepalive ping listed in config.json.
 """
 
 import datetime as dt
 import glob
+import hashlib
 import json
 import os
 import re
 import shutil
+import socket
 import sqlite3
 import subprocess
 import urllib.request
@@ -92,6 +101,57 @@ CREATE TABLE IF NOT EXISTS runs (
   alerts INTEGER,
   notes TEXT
 );
+CREATE TABLE IF NOT EXISTS resources (   -- shared services: a domain, a Supabase project, a repo
+  id TEXT PRIMARY KEY,
+  name TEXT,
+  type TEXT,
+  category TEXT,
+  note TEXT
+);
+CREATE TABLE IF NOT EXISTS refs (        -- project (path) mentions resource, found in file
+  path TEXT,
+  resource TEXT,
+  file TEXT,
+  hits INTEGER,
+  PRIMARY KEY (path, resource)
+);
+CREATE TABLE IF NOT EXISTS links (       -- project/resource -> project/resource
+  src TEXT,
+  dst TEXT,
+  kind TEXT,
+  note TEXT,
+  PRIMARY KEY (src, dst, kind)
+);
+CREATE TABLE IF NOT EXISTS peers (       -- the other Mac(s), from their snapshot
+  machine TEXT PRIMARY KEY,
+  generated TEXT,
+  last_run TEXT,
+  laptop INTEGER,
+  alerts TEXT
+);
+CREATE TABLE IF NOT EXISTS peer_projects (
+  machine TEXT,
+  path TEXT,
+  name TEXT,
+  category TEXT,
+  kind TEXT,
+  branch TEXT,
+  remote TEXT,
+  head TEXT,
+  dirty_files INTEGER,
+  unpushed INTEGER,
+  last_modified TEXT,
+  uses TEXT,
+  PRIMARY KEY (machine, path)
+);
+CREATE TABLE IF NOT EXISTS notes (
+  machine TEXT,
+  created TEXT,
+  topic TEXT,
+  text TEXT,
+  PRIMARY KEY (machine, created, text)
+);
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE INDEX IF NOT EXISTS conv_cat ON conversations(category);
 CREATE INDEX IF NOT EXISTS conv_end ON conversations(ended);
 CREATE INDEX IF NOT EXISTS alerts_run ON alerts(run_date);
@@ -148,6 +208,8 @@ def load_config():
         if os.path.exists(src):
             with open(src) as f:
                 cfg = _merge(cfg, json.load(f)) if cfg else json.load(f)
+    if is_laptop():                      # e.g. the MacBook doesn't carry the Work drive
+        cfg.update(cfg.get("laptop_overrides", {}))
     cfg["scan_roots"] = [os.path.expanduser(p) for p in cfg.get("scan_roots", [])]
     return cfg
 
@@ -157,7 +219,31 @@ def connect():
     con = sqlite3.connect(DB)
     con.row_factory = sqlite3.Row
     con.executescript(SCHEMA)
+    if "head" not in {r[1] for r in con.execute("PRAGMA table_info(projects)")}:
+        con.execute("ALTER TABLE projects ADD COLUMN head TEXT")
     return con
+
+
+def machine_name():
+    name = os.environ.get("PMP_BRAIN_MACHINE", "")
+    if not name and sys.platform == "darwin":
+        name = run(["scutil", "--get", "LocalHostName"])
+    name = name or socket.gethostname().split(".")[0] or "mac"
+    return re.sub(r"[^A-Za-z0-9_-]", "-", name)[:40]
+
+
+def is_laptop():
+    if "PMP_BRAIN_LAPTOP" in os.environ:
+        return os.environ["PMP_BRAIN_LAPTOP"] == "1"
+    return sys.platform == "darwin" and "InternalBattery" in run(["pmset", "-g", "batt"])
+
+
+def shared_dir(cfg):
+    """Folder both Macs can see. iCloud Drive unless config.json names another (e.g. a Syncthing folder)."""
+    d = cfg.get("shared_dir")
+    if d:
+        return os.path.expanduser(d)
+    return os.path.join(ICLOUD, "PMPBrain") if os.path.isdir(ICLOUD) else None
 
 
 def categorize(text, cfg):
@@ -225,11 +311,12 @@ def project_info(path, cfg):
         info["dirty_files"] = len([l for l in status.splitlines() if l.strip()])
         ahead = run(["git", "rev-list", "--count", "@{u}..HEAD"], path)
         info["unpushed"] = int(ahead) if ahead.isdigit() else (-1 if info["remote"] else 0)
+        info["head"] = run(["git", "rev-parse", "--short=12", "HEAD"], path)
         info["last_commit"] = run(["git", "log", "-1", "--format=%cI"], path)
         info["last_commit_msg"] = run(["git", "log", "-1", "--format=%s"], path)[:120]
         text += " " + info["remote"] + " " + run(["git", "log", "-20", "--format=%s"], path)
     else:
-        info.update(branch="", remote="", dirty_files=0, unpushed=0,
+        info.update(branch="", remote="", dirty_files=0, unpushed=0, head="",
                     last_commit="", last_commit_msg="")
     for readme in ("CLAUDE.md", "README.md"):
         fp = os.path.join(path, readme)
@@ -247,13 +334,13 @@ def sync_projects(con, cfg):
     for p in paths:
         i = project_info(p, cfg)
         con.execute("""
-          INSERT INTO projects (path,name,category,kind,branch,remote,dirty_files,unpushed,
+          INSERT INTO projects (path,name,category,kind,branch,remote,head,dirty_files,unpushed,
              last_commit,last_commit_msg,last_modified,has_claude_md,first_seen,last_seen,active)
-          VALUES (:path,:name,:category,:kind,:branch,:remote,:dirty_files,:unpushed,
+          VALUES (:path,:name,:category,:kind,:branch,:remote,:head,:dirty_files,:unpushed,
              :last_commit,:last_commit_msg,:last_modified,:has_claude_md,:s,:s,1)
           ON CONFLICT(path) DO UPDATE SET name=excluded.name, category=excluded.category,
              kind=excluded.kind, branch=excluded.branch, remote=excluded.remote,
-             dirty_files=excluded.dirty_files, unpushed=excluded.unpushed,
+             head=excluded.head, dirty_files=excluded.dirty_files, unpushed=excluded.unpushed,
              last_commit=excluded.last_commit, last_commit_msg=excluded.last_commit_msg,
              last_modified=excluded.last_modified, has_claude_md=excluded.has_claude_md,
              last_seen=excluded.last_seen, active=1
@@ -354,6 +441,276 @@ def sync_facts(con, cfg):
                     (k, v["value"], v.get("category", ""), today()))
 
 
+# ---------------------------------------------------------------- cross-references
+
+TEXT_EXT = {".html", ".htm", ".js", ".mjs", ".ts", ".tsx", ".jsx", ".json", ".md", ".txt", ".py",
+            ".sh", ".command", ".toml", ".yml", ".yaml", ".sql", ".css", ".xml", ".plist", ".csv"}
+TEXT_NAMES = {"CNAME", "Dockerfile", "Makefile", "Procfile"}
+MAX_FILE, MAX_FILES = 400_000, 400
+
+
+def slug_of(remote):
+    """git@github.com:Owner/Repo.git and https://github.com/Owner/Repo -> owner/repo"""
+    m = re.search(r"[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?$", remote or "")
+    return m.group(1).lower() if m else ""
+
+
+def sync_resources(con, cfg):
+    """Config resources plus one per git remote on this Mac. Returns [(id, compiled pattern)]."""
+    pats = []
+    con.execute("DELETE FROM resources")
+    for r in cfg.get("resources", []):
+        con.execute("INSERT OR REPLACE INTO resources VALUES (?,?,?,?,?)",
+                    (r["id"], r.get("name", r["id"]), r.get("type", ""), r.get("category", ""), r.get("note", "")))
+        for p in r.get("patterns", []):
+            try:
+                pats.append((r["id"], re.compile(p, re.I)))
+            except re.error:
+                pass
+    for row in con.execute("SELECT DISTINCT remote FROM projects WHERE active=1 AND remote!=''"):
+        slug = slug_of(row["remote"])
+        if slug:   # "owner/repo" but not "owner/repo.ca" or "owner/repo-two"
+            pats.append(("repo:" + slug, re.compile(re.escape(slug) + r"(?![\w-])(?!\.(?!git\b)\w)", re.I)))
+    return pats
+
+
+def scan_project(path, pats, skip):
+    """Count mentions of each resource in a project's text files. Keeps the file name, never the text."""
+    hits, seen = {}, 0
+    for dp, dn, fn in os.walk(path):
+        dn[:] = [d for d in dn if d not in skip and (not d.startswith(".") or d in (".github", ".claude"))]
+        for f in fn:
+            if f.startswith(".env") or not (os.path.splitext(f)[1].lower() in TEXT_EXT or f in TEXT_NAMES):
+                continue
+            fp = os.path.join(dp, f)
+            try:
+                if os.path.getsize(fp) > MAX_FILE:
+                    continue
+                with open(fp, errors="ignore") as fh:
+                    text = fh.read()
+            except OSError:
+                continue
+            for rid, rx in pats:
+                n = len(rx.findall(text))
+                if n:
+                    h = hits.setdefault(rid, [0, os.path.relpath(fp, path)])
+                    h[0] += n
+            seen += 1
+            if seen >= MAX_FILES:
+                return hits
+    return hits
+
+
+def sync_refs(con, cfg):
+    pats = sync_resources(con, cfg)
+    sig = hashlib.md5(repr([(i, p.pattern) for i, p in pats]).encode()).hexdigest()[:12]
+    skip = set(cfg.get("skip_dirs", [])) | {".git"}
+    quiet = set(cfg.get("xref_skip_projects", []))
+    live = set()
+    for r in con.execute("SELECT * FROM projects WHERE active=1").fetchall():
+        live.add(r["path"])
+        # the clinical lane is never read; the brain's own folders mention everything by design
+        if r["category"] == "Clinical documentation" or r["name"] in quiet:
+            con.execute("DELETE FROM refs WHERE path=?", (r["path"],))
+            continue
+        key, stamp = "scan:" + r["path"], "%s|%s" % (r["last_modified"], sig)
+        old = con.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
+        if old and old[0] == stamp:
+            continue                       # nothing changed since the last scan
+        own = "repo:" + slug_of(r["remote"])
+        con.execute("DELETE FROM refs WHERE path=?", (r["path"],))
+        for rid, (n, f) in scan_project(r["path"], pats, skip).items():
+            if rid != own:
+                con.execute("INSERT OR REPLACE INTO refs VALUES (?,?,?,?)", (r["path"], rid, f, n))
+        con.execute("INSERT OR REPLACE INTO meta VALUES (?,?)", (key, stamp))
+    for row in con.execute("SELECT DISTINCT path FROM refs").fetchall():
+        if row[0] not in live:
+            con.execute("DELETE FROM refs WHERE path=?", (row[0],))
+
+    # links: the ones written down in config.json, then one per repo that names another repo
+    con.execute("DELETE FROM links")
+    for l in cfg.get("links", []):
+        con.execute("INSERT OR REPLACE INTO links VALUES (?,?,?,?)",
+                    (l["from"], l["to"], l.get("kind", "linked to"), l.get("note", "")))
+    by_slug = {}
+    for r in con.execute("SELECT name, remote FROM projects WHERE active=1 AND remote!=''"):
+        by_slug.setdefault(slug_of(r["remote"]), r["name"])
+    for r in con.execute("""SELECT p.name, f.resource, f.file FROM refs f JOIN projects p ON p.path=f.path
+                            WHERE f.resource LIKE 'repo:%'""").fetchall():
+        other = by_slug.get(r["resource"][5:])
+        if other and other != r["name"]:
+            con.execute("INSERT OR IGNORE INTO links VALUES (?,?,?,?)",
+                        (r["name"], other, "mentions", "in " + r["file"]))
+
+
+def resource_users(con):
+    """{resource id: sorted project names}, this Mac and the others."""
+    out = {}
+    for r in con.execute("SELECT p.name, f.resource FROM refs f JOIN projects p ON p.path=f.path WHERE p.active=1"):
+        out.setdefault(r["resource"], set()).add(r["name"])
+    for r in con.execute("SELECT name, uses FROM peer_projects"):
+        for rid in filter(None, (r["uses"] or "").split(",")):
+            out.setdefault(rid, set()).add(r["name"])
+    return {k: sorted(v) for k, v in out.items()}
+
+
+def map_lines(con):
+    """The whole map, short enough to sit in CONTEXT.md."""
+    names = {r["id"]: (r["name"], r["type"]) for r in con.execute("SELECT * FROM resources")}
+    L = []
+    for rid, users in sorted(resource_users(con).items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        if rid in names:
+            L.append("- %s (%s): %s" % (names[rid][0], names[rid][1] or "service", ", ".join(users)))
+    for r in con.execute("SELECT * FROM links ORDER BY kind='mentions', src, dst"):
+        L.append("- %s -> %s: %s%s" % (r["src"], r["dst"], r["kind"], (" (%s)" % r["note"]) if r["note"] else ""))
+    return L
+
+
+# ---------------------------------------------------------------- the other Mac
+
+def export_snapshot(con, cfg):
+    """What the other Mac needs to know about this one. No conversation text, no file contents."""
+    d = shared_dir(cfg)
+    if not d:
+        return None
+    uses = {}
+    for r in con.execute("SELECT path, resource FROM refs"):
+        uses.setdefault(r["path"], []).append(r["resource"])
+    me = machine_name()
+    last = con.execute("SELECT finished FROM runs WHERE kind='nightly' AND ok=1 ORDER BY id DESC LIMIT 1").fetchone()
+    snap = {
+        "machine": me, "laptop": int(is_laptop()), "generated": now().isoformat(),
+        "last_run": last[0] if last else "",
+        "projects": [dict(name=r["name"], path=r["path"].replace(HOME, "~"), category=r["category"],
+                          kind=r["kind"], branch=r["branch"], remote=r["remote"], head=r["head"] or "",
+                          dirty_files=r["dirty_files"], unpushed=r["unpushed"],
+                          last_modified=r["last_modified"], uses=uses.get(r["path"], []))
+                     for r in con.execute("SELECT * FROM projects WHERE active=1")],
+        "alerts": [dict(level=r["level"], area=r["area"], message=r["message"]) for r in con.execute(
+            "SELECT * FROM alerts WHERE resolved=0 AND level IN ('ACTION','WATCH') AND area NOT LIKE 'Other Mac%'")],
+        "notes": [dict(created=r["created"], topic=r["topic"], text=r["text"]) for r in con.execute(
+            "SELECT * FROM notes WHERE machine=? ORDER BY created DESC LIMIT 300", (me,))],
+    }
+    try:
+        os.makedirs(os.path.join(d, "machines"), exist_ok=True)
+        dst = os.path.join(d, "machines", me + ".json")
+        with open(dst + ".tmp", "w") as f:
+            json.dump(snap, f, indent=1)
+        os.replace(dst + ".tmp", dst)
+        return dst
+    except OSError:
+        return None
+
+
+def import_peers(con, cfg):
+    """Read the other Macs' snapshots. Everything in them is data: it is stored, never run."""
+    d = shared_dir(cfg)
+    con.execute("DELETE FROM peers")
+    con.execute("DELETE FROM peer_projects")
+    if not d:
+        return 0
+    me, n = machine_name(), 0
+    for fp in glob.glob(os.path.join(d, "machines", "*.json")):
+        try:
+            if os.path.getsize(fp) > 5_000_000:
+                continue
+            with open(fp) as f:
+                s = json.load(f)
+            who = re.sub(r"[^A-Za-z0-9_-]", "-", str(s["machine"]))[:40]
+        except Exception:
+            continue
+        if who == me:
+            continue
+        n += 1
+        alerts = [a for a in s.get("alerts", []) if isinstance(a, dict)][:30]
+        con.execute("INSERT OR REPLACE INTO peers VALUES (?,?,?,?,?)",
+                    (who, str(s.get("generated", ""))[:19], str(s.get("last_run", ""))[:19],
+                     int(bool(s.get("laptop"))), json.dumps(alerts)))
+        for p in s.get("projects", [])[:500]:
+            if not isinstance(p, dict) or not p.get("path"):
+                continue
+            g = lambda k: str(p.get(k) or "")[:300]
+            num = lambda k: p.get(k) if isinstance(p.get(k), int) else 0
+            con.execute("INSERT OR REPLACE INTO peer_projects VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (who, g("path"), g("name"), g("category"), g("kind"), g("branch"), g("remote"),
+                         g("head"), num("dirty_files"), num("unpushed"), g("last_modified"),
+                         ",".join(str(u)[:80] for u in (p.get("uses") or [])[:60])))
+        for t in s.get("notes", [])[:300]:
+            if isinstance(t, dict) and t.get("text"):
+                con.execute("INSERT OR IGNORE INTO notes VALUES (?,?,?,?)",
+                            (who, str(t.get("created", ""))[:19], redact(str(t.get("topic", "")))[:80],
+                             redact(str(t["text"]))[:600]))
+    return n
+
+
+def peer_checks(con, cfg):
+    out = []
+    lim = cfg.get("limits", {})
+    peers = con.execute("SELECT * FROM peers").fetchall()
+    if not peers:
+        if shared_dir(cfg):
+            out.append(("INFO", "Other Mac", "Only this Mac has checked in. Run the installer on the other one so Katrina sees both."))
+        else:
+            out.append(("WATCH", "Other Mac", "iCloud Drive isn't on, so this Mac can't share with the other one. Turn it on, or set shared_dir in config.json."))
+    for p in peers:
+        try:
+            age = (now() - dt.datetime.fromisoformat(p["generated"])).days
+        except ValueError:
+            age = 99
+        if age >= lim.get("peer_days", 4):
+            out.append(("WATCH", "Other Mac", "%s last checked in %d days ago, so what's listed for it is stale. Open it and let it run." % (p["machine"], age)))
+    mine = {}
+    for r in con.execute("SELECT * FROM projects WHERE active=1 AND remote!=''"):
+        mine.setdefault(slug_of(r["remote"]), r)
+    for pp in con.execute("SELECT * FROM peer_projects WHERE remote!=''").fetchall():
+        r = mine.get(slug_of(pp["remote"]))
+        if not r:
+            continue
+        loose = []
+        if pp["dirty_files"]:
+            loose.append("%d uncommitted file(s)" % pp["dirty_files"])
+        if pp["unpushed"] and pp["unpushed"] > 0:
+            loose.append("%d unpushed commit(s)" % pp["unpushed"])
+        if loose:
+            out.append(("WATCH", r["category"], "%s has %s on %s. Push from there before editing it here, or the two copies split." % (r["name"], " and ".join(loose), pp["machine"])))
+        elif (pp["head"] and r["head"] and pp["head"] != r["head"] and pp["branch"] == r["branch"]
+              and not r["dirty_files"] and not (r["unpushed"] and r["unpushed"] > 0)):
+            out.append(("INFO", r["category"], "%s is on a different commit here than on %s (branch %s). Run git pull on the one that's behind." % (r["name"], pp["machine"], r["branch"])))
+    return out
+
+
+# ---------------------------------------------------------------- search index
+
+def build_search(con):
+    """Full-text index over everything, both Macs. Rebuilt nightly; a lookup takes milliseconds."""
+    try:
+        con.execute("CREATE VIRTUAL TABLE IF NOT EXISTS search_idx USING fts5(kind, title, body, ref UNINDEXED, tokenize='porter unicode61')")
+    except sqlite3.OperationalError:
+        return False                       # no FTS5 in this sqlite: search falls back to LIKE
+    con.execute("DELETE FROM search_idx")
+    add = lambda *row: con.execute("INSERT INTO search_idx VALUES (?,?,?,?)", row)
+    users = resource_users(con)
+    for r in con.execute("SELECT * FROM projects WHERE active=1"):
+        add("Project", r["name"], " ".join([r["category"] or "", r["branch"] or "", r["remote"] or "",
+                                              r["last_commit_msg"] or ""]), r["path"].replace(HOME, "~"))
+    for r in con.execute("SELECT * FROM peer_projects"):
+        add("Project on " + r["machine"], r["name"], " ".join([r["category"], r["branch"], r["remote"]]), r["path"])
+    for r in con.execute("SELECT * FROM conversations"):
+        add("Conversation", r["title"] or "untitled", " ".join([r["category"] or "", r["summary"] or "",
+                                                                  r["project_path"] or ""]),
+            "%s %s" % ((r["ended"] or "")[:10], r["session_id"]))
+    for r in con.execute("SELECT * FROM facts"):
+        add("Fact", r["key"], r["value"], r["category"])
+    for r in con.execute("SELECT * FROM resources"):
+        add("Service", r["name"], " ".join([r["id"], r["type"], r["note"], " ".join(users.get(r["id"], []))]),
+            "used by " + (", ".join(users.get(r["id"], [])) or "nothing scanned yet"))
+    for r in con.execute("SELECT * FROM links"):
+        add("Link", "%s -> %s" % (r["src"], r["dst"]), r["kind"] + " " + r["note"], r["kind"])
+    for r in con.execute("SELECT * FROM notes"):
+        add("Note", r["topic"], r["text"], "%s on %s" % (r["created"][:10], r["machine"]))
+    return True
+
+
 # ---------------------------------------------------------------- verification
 
 def verify(con, cfg):
@@ -448,11 +805,17 @@ def verify(con, cfg):
         if len(old) > lim.get("downloads_old", 50):
             out.append(("INFO", "Mac", "%d files in Downloads older than 30 days. Worth a clear-out." % len(old)))
 
+    out += peer_checks(con, cfg)
+
     # PHI wall check on the database itself
     leaks = 0
     for r in con.execute("SELECT summary, title FROM conversations"):
         blob = (r["summary"] or "") + " " + (r["title"] or "")
         if any(p.search(blob) for p in PHI_PATTERNS[:3]):
+            leaks += 1
+    for r in con.execute("SELECT rowid, topic, text FROM notes").fetchall():
+        if any(p.search(r["topic"] + " " + r["text"]) for p in PHI_PATTERNS[:3]):
+            con.execute("DELETE FROM notes WHERE rowid=?", (r["rowid"],))
             leaks += 1
     if leaks:
         con.execute("UPDATE conversations SET summary='' WHERE phi_risk=1")
@@ -465,7 +828,8 @@ def verify(con, cfg):
 
 def write_context(con, cfg):
     """CONTEXT.md is what every future Claude Code session on this Mac reads first."""
-    L = ["# PMP Brain context (auto-generated %s, do not edit; edit config.json or profile.md)" % now().strftime("%Y-%m-%d %H:%M"), ""]
+    L = ["# PMP Brain context for %s (auto-generated %s, do not edit; edit config.json or profile.md)"
+         % (machine_name(), now().strftime("%Y-%m-%d %H:%M")), ""]
     prof = os.path.join(BASE, "profile.md")
     if os.path.exists(prof):
         with open(prof) as f:
@@ -487,6 +851,26 @@ def write_context(con, cfg):
             (" on " + r["branch"]) if r["branch"] else "",
             (r["last_modified"] or "")[:10],
             (" (" + ", ".join(state) + ")") if state else ""))
+    L += ["", "## How the projects connect", "",
+          "Each line is one shared piece and every project that touches it. Change the piece and you change them all."]
+    L += map_lines(con) or ["- Nothing cross-referenced yet."]
+    for p in con.execute("SELECT * FROM peers ORDER BY machine"):
+        L += ["", "## Also on %s (checked in %s)" % (p["machine"], p["generated"][:16].replace("T", " ")), ""]
+        for r in con.execute("SELECT * FROM peer_projects WHERE machine=? ORDER BY category, name", (p["machine"],)):
+            state = []
+            if r["dirty_files"]:
+                state.append("%d uncommitted" % r["dirty_files"])
+            if r["unpushed"] and r["unpushed"] > 0:
+                state.append("%d unpushed" % r["unpushed"])
+            L.append("- [%s] `%s` %s%s%s" % (r["category"], r["path"], r["kind"],
+                                             (" on " + r["branch"]) if r["branch"] else "",
+                                             (" (" + ", ".join(state) + ")") if state else ""))
+        for a in json.loads(p["alerts"] or "[]"):
+            L.append("- %s there: %s" % (str(a.get("level", ""))[:6], redact(str(a.get("message", "")))[:240]))
+    notes = con.execute("SELECT * FROM notes ORDER BY created DESC LIMIT 25").fetchall()
+    if notes:
+        L += ["", "## Decisions and notes (newest first, both Macs)", ""]
+        L += ["- %s [%s] %s" % (n["created"][:10], n["topic"], n["text"]) for n in notes]
     L += ["", "## Recent conversations (last 30 days, newest first)", ""]
     since = (now() - dt.timedelta(days=30)).isoformat()
     for r in con.execute("""SELECT * FROM conversations WHERE ended >= ? ORDER BY ended DESC LIMIT 60""", (since,)):
@@ -498,6 +882,8 @@ def write_context(con, cfg):
     L += ["", "## How to use this", "",
           "- Check here before asking Paul where a project lives, what it's called, or what was decided.",
           "- Query more with `python3 ~/PMPBrain/brain.py search <words>`.",
+          "- Before changing anything shared, run `python3 ~/PMPBrain/brain.py xref <name>` and check each project it lists.",
+          "- Keep a decision with `python3 ~/PMPBrain/brain.py note <topic> <text>`. It reaches the other Mac.",
           "- The database never holds patient details. Keep it that way."]
     with open(CONTEXT, "w") as f:
         f.write("\n".join(L) + "\n")
@@ -509,7 +895,7 @@ def write_report(con, alerts, counts):
     by = {"ACTION": [], "WATCH": [], "INFO": []}
     for lvl, area, msg in alerts:
         by.setdefault(lvl, []).append("%s: %s" % (area, msg))
-    L = ["# Nightly check %s" % d]
+    L = ["# Nightly check %s on %s" % (d, machine_name())]
     if not by["ACTION"] and not by["WATCH"]:
         L += ["", "Nothing needs you. All checks passed."]
     for lvl, head in (("ACTION", "Needs you"), ("WATCH", "Keep an eye on"), ("INFO", "FYI")):
@@ -519,6 +905,10 @@ def write_report(con, alerts, counts):
           "- Projects tracked: %d" % counts["projects"],
           "- New conversations indexed tonight: %d" % counts["new"],
           "- Conversations in the database: %d" % con.execute("SELECT COUNT(*) FROM conversations").fetchone()[0]]
+    for p in con.execute("SELECT * FROM peers ORDER BY machine"):
+        L += ["", "## %s (checked in %s)" % (p["machine"], p["generated"][:16].replace("T", " "))]
+        theirs = json.loads(p["alerts"] or "[]")
+        L += ["- %s: %s" % (str(a.get("area", ""))[:40], redact(str(a.get("message", "")))[:240]) for a in theirs] or ["- Nothing open there."]
     L += ["", "## Conversations by category (last 7 days)"]
     since = (now() - dt.timedelta(days=7)).isoformat()
     for r in con.execute("SELECT category, COUNT(*) n FROM conversations WHERE ended>=? GROUP BY category ORDER BY n DESC", (since,)):
@@ -580,11 +970,16 @@ def cmd_nightly():
         sync_facts(con, cfg)
         n_proj = sync_projects(con, cfg)
         n_new = sync_conversations(con, cfg)
+        sync_refs(con, cfg)
+        import_peers(con, cfg)
         con.commit()
         alerts = verify(con, cfg)
         con.execute("UPDATE alerts SET resolved=1 WHERE resolved=0")
         for lvl, area, msg in alerts:
             con.execute("INSERT INTO alerts(run_date,level,area,message) VALUES(?,?,?,?)", (today(), lvl, area, msg))
+        con.commit()
+        export_snapshot(con, cfg)
+        build_search(con)
         con.commit()
         write_context(con, cfg)
         report = write_report(con, alerts, {"projects": n_proj, "new": n_new})
@@ -625,7 +1020,7 @@ def cmd_brief():
 def cmd_status():
     con = connect()
     print("Database:", DB)
-    for t in ("projects", "conversations", "facts", "alerts", "runs"):
+    for t in ("projects", "conversations", "facts", "resources", "links", "notes", "peer_projects", "alerts", "runs"):
         print("  %-14s %d" % (t, con.execute("SELECT COUNT(*) FROM %s" % t).fetchone()[0]))
     print("\nProjects by category:")
     for r in con.execute("SELECT category, COUNT(*) n FROM projects WHERE active=1 GROUP BY category ORDER BY n DESC"):
@@ -640,6 +1035,18 @@ def cmd_status():
 
 def cmd_search(q):
     con = connect()
+    terms = re.findall(r"\w+", q)
+    try:
+        rows = con.execute("SELECT kind, title, ref FROM search_idx WHERE search_idx MATCH ? ORDER BY rank LIMIT 60",
+                           (" ".join('"%s"*' % t for t in terms),)).fetchall() if terms else []
+    except sqlite3.OperationalError:
+        rows = None                        # index not built yet (or no FTS5): plain scan
+    if rows is not None:
+        for r in rows:
+            print("  %-14s %s  (%s)" % (r["kind"], r["title"], r["ref"]))
+        if not rows:
+            print("Nothing matches '%s'." % q)
+        return
     like = "%" + q + "%"
     print("Projects:")
     for r in con.execute("SELECT * FROM projects WHERE active=1 AND (name LIKE ? OR path LIKE ? OR category LIKE ? OR last_commit_msg LIKE ?)", (like,) * 4):
@@ -650,6 +1057,90 @@ def cmd_search(q):
     print("Facts:")
     for r in con.execute("SELECT * FROM facts WHERE key LIKE ? OR value LIKE ?", (like,) * 2):
         print("  %s: %s" % (r["key"], r["value"]))
+
+
+def cmd_xref(q):
+    con = connect()
+    if not q:
+        print("\n".join(map_lines(con)) or "Nothing cross-referenced yet. Run: brain.py nightly")
+        return
+    like = "%" + q + "%"
+    users = resource_users(con)
+    res = con.execute("SELECT * FROM resources WHERE lower(id)=lower(?) OR lower(name)=lower(?)", (q, q)).fetchall() \
+        or con.execute("SELECT * FROM resources WHERE id LIKE ? OR name LIKE ?", (like, like)).fetchall()
+    names = [r[0] for r in con.execute("""SELECT name FROM projects WHERE active=1 AND lower(name)=lower(?)
+                                          UNION SELECT name FROM peer_projects WHERE lower(name)=lower(?)""", (q, q))] \
+        or [r[0] for r in con.execute("""SELECT name FROM projects WHERE active=1 AND name LIKE ?
+                                         UNION SELECT name FROM peer_projects WHERE name LIKE ?""", (like, like))]
+    if not res and not names:
+        print("Nothing called '%s'. Try: brain.py search %s" % (q, q))
+        return
+    label = {r["id"]: r["name"] for r in con.execute("SELECT * FROM resources")}
+    for name in names:
+        print("PROJECT %s" % name)
+        for r in con.execute("SELECT * FROM projects WHERE active=1 AND name=?", (name,)):
+            print("  here (%s): %s  %s %s, %d uncommitted, %s unpushed" % (
+                machine_name(), r["path"].replace(HOME, "~"), r["kind"], r["branch"] or "", r["dirty_files"] or 0, r["unpushed"] or 0))
+            since = (now() - dt.timedelta(days=30)).isoformat()
+            convs = con.execute("SELECT * FROM conversations WHERE project_path LIKE ? AND ended>=? ORDER BY ended DESC",
+                                (r["path"] + "%", since)).fetchall()
+            if convs:
+                print("  conversations, last 30 days: %d. Latest: %s" % (len(convs), "; ".join(
+                    "%s %s" % ((c["ended"] or "")[:10], c["title"] or "untitled") for c in convs[:4])))
+        for r in con.execute("SELECT * FROM peer_projects WHERE name=?", (name,)):
+            print("  on %s: %s  %s %s, %d uncommitted, %s unpushed" % (
+                r["machine"], r["path"], r["kind"], r["branch"], r["dirty_files"] or 0, r["unpushed"] or 0))
+        mine = sorted(rid for rid, us in users.items() if name in us and rid in label)
+        for rid in mine:
+            others = [u for u in users[rid] if u != name]
+            ev = con.execute("SELECT f.file FROM refs f JOIN projects p ON p.path=f.path WHERE p.name=? AND f.resource=?", (name, rid)).fetchone()
+            print("  uses %s%s%s" % (label[rid], (" [%s]" % ev[0]) if ev else "",
+                                     (". Also used by: " + ", ".join(others)) if others else ""))
+        for r in con.execute("SELECT * FROM links WHERE src=? OR dst=?", (name, name)):
+            print("  %s -> %s: %s%s" % (r["src"], r["dst"], r["kind"], (" (%s)" % r["note"]) if r["note"] else ""))
+        for n in con.execute("SELECT * FROM notes WHERE lower(topic)=lower(?) ORDER BY created DESC LIMIT 8", (name,)):
+            print("  note %s: %s" % (n["created"][:10], n["text"]))
+    for r in res:
+        print("SERVICE %s (%s)%s" % (r["name"], r["type"] or r["id"], (": " + r["note"]) if r["note"] else ""))
+        print("  used by: %s" % (", ".join(users.get(r["id"], [])) or "no project scanned on either Mac"))
+        for l in con.execute("SELECT * FROM links WHERE src IN (?,?) OR dst IN (?,?)", (r["id"], r["name"]) * 2):
+            print("  %s -> %s: %s%s" % (l["src"], l["dst"], l["kind"], (" (%s)" % l["note"]) if l["note"] else ""))
+
+
+def cmd_machines():
+    cfg = load_config()
+    con = connect()
+    last = con.execute("SELECT finished FROM runs WHERE kind='nightly' AND ok=1 ORDER BY id DESC LIMIT 1").fetchone()
+    print("%-22s this Mac%s, last good run %s" % (machine_name(), " (laptop)" if is_laptop() else "", last[0] if last else "never"))
+    for p in con.execute("SELECT * FROM peers ORDER BY machine"):
+        n = con.execute("SELECT COUNT(*) FROM peer_projects WHERE machine=?", (p["machine"],)).fetchone()[0]
+        print("%-22s checked in %s, %d projects, %d open alert(s)" % (p["machine"], p["generated"], n, len(json.loads(p["alerts"] or "[]"))))
+    print("Shared folder:", shared_dir(cfg) or "none (iCloud Drive is off)")
+
+
+def cmd_sync():
+    cfg = load_config()
+    con = connect()
+    n = import_peers(con, cfg)
+    dst = export_snapshot(con, cfg)
+    build_search(con)
+    con.commit()
+    write_context(con, cfg)
+    print("Read %d other Mac(s). Wrote %s" % (n, dst or "nothing: no shared folder"))
+
+
+def cmd_note(topic, text):
+    blob = topic + " " + text
+    if len(CLINICAL_WORDS.findall(blob)) >= 3 or any(p.search(blob) for p in PHI_PATTERNS[:3]):
+        print("Not kept: that reads like patient detail. Notes are for project decisions only.")
+        return 1
+    con = connect()
+    con.execute("INSERT OR IGNORE INTO notes VALUES (?,?,?,?)",
+                (machine_name(), now().isoformat(), redact(topic)[:80], redact(" ".join(text.split()))[:600]))
+    con.commit()
+    con.close()
+    cmd_sync()
+    return 0
 
 
 def main(argv):
@@ -667,6 +1158,14 @@ def main(argv):
         cmd_status()
     elif c == "search" and len(argv) > 2:
         cmd_search(" ".join(argv[2:]))
+    elif c == "xref":
+        cmd_xref(" ".join(argv[2:]))
+    elif c == "machines":
+        cmd_machines()
+    elif c == "sync":
+        cmd_sync()
+    elif c == "note" and len(argv) > 3:
+        return cmd_note(argv[2], " ".join(argv[3:]))
     else:
         print(__doc__)
         return 1
