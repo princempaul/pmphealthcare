@@ -15,7 +15,32 @@ cp "$SRC/katrina/registry.md" "$DEST/registry.md"
 
 # Personal Assistant Katrina: the agent itself, and a `katrina` command to start her.
 mkdir -p "$HOME/.claude/agents" "$DEST/bin"
-cp "$SRC/.claude/agents/katrina.md" "$HOME/.claude/agents/katrina.md"
+cp "$SRC"/.claude/agents/katrina*.md "$HOME/.claude/agents/"
+
+# Let Katrina and her helpers run brain.py and read ~/PMPBrain without a permission prompt each time.
+/usr/bin/python3 - "$HOME/.claude/settings.json" <<'PY'
+import json, os, sys
+p = sys.argv[1]
+try:
+    with open(p) as f:
+        s = json.load(f)
+except FileNotFoundError:
+    s = {}
+except ValueError:
+    print("Left ~/.claude/settings.json alone: it isn't valid JSON. Fix it and run ./install.sh again.")
+    sys.exit(0)
+allow = s.setdefault("permissions", {}).setdefault("allow", [])
+home = os.path.expanduser("~")
+for rule in ("Bash(python3 ~/PMPBrain/brain.py:*)", "Bash(python3 %s/PMPBrain/brain.py:*)" % home,
+             "Bash(/usr/bin/python3 ~/PMPBrain/brain.py:*)", "Read(~/PMPBrain/**)"):
+    if rule not in allow:
+        allow.append(rule)
+tmp = p + ".tmp"
+with open(tmp, "w") as f:
+    json.dump(s, f, indent=2)
+os.replace(tmp, p)
+print("Allowed brain.py and ~/PMPBrain reads in ~/.claude/settings.json (no prompts for lookups).")
+PY
 cat > "$DEST/bin/katrina" <<'KAT'
 #!/bin/bash
 # Start Personal Assistant Katrina. Finds Claude Code wherever it was installed.

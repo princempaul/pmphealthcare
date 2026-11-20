@@ -11,6 +11,12 @@ Macs, how they connect, what's open and what was decided. Inside any other Claud
 ask for her by name ("have Katrina check what's open").
 
 - Her instructions: `.claude/agents/katrina.md` (installed to `~/.claude/agents/`)
+- Her helpers, picked by cost: `katrina-scout` (Haiku, read-only lookups), `katrina-builder`
+  (Sonnet, scoped changes on a branch), `katrina-checker` (Sonnet, reviews before anything is
+  pushed). Katrina plans and checks; the helpers do the legwork, so most tokens go to the
+  cheaper models.
+- The installer allows `brain.py` and reads of `~/PMPBrain` in `~/.claude/settings.json`, so
+  lookups don't stop for a permission prompt.
 - Her memory: `~/PMPBrain` (below)
 - The cloud side she watches: `katrina/registry.md`
 

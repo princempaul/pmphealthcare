@@ -1,6 +1,6 @@
 # Katrina's registry: the cloud side and what feeds what
 
-Checked 2026-11-18. The Macs' own projects are in `~/PMPBrain/CONTEXT.md`; this file covers what
+Checked 2026-11-18, updated 2026-11-20. The Macs' own projects are in `~/PMPBrain/CONTEXT.md`; this file covers what
 doesn't live on a Mac. This repo is public, so there are no account ids, no figures and nothing
 about patients here. Live state is always the connector, not this page.
 
@@ -57,6 +57,7 @@ Career, Income), Project & conversation index (the cloud twin of `brain.db`), Ru
 | Consult Note guideline refresh | 1 Feb/May/Aug/Nov 14:17 | guideline sources | `claude/00 Master Reference` |
 | Monthly money close | 1st 07:20 | QuickBooks | Briefs |
 | Nightly review | daily 23:30 | tasks, sessions, GitHub, Gmail, Calendar, Cloudflare; prompt in `cloud/nightly-review-prompt.md` here | index, Briefs |
+| Bluewater social weekly check | Mon 14:23 (first run Nov 23) | social accounts | not yet seen |
 | Weekly career & income scout | Fri 16:20 (off) | web | Briefs |
 | Desktop sync progress | hourly (off) | MacBook iCloud folder | phone |
 
