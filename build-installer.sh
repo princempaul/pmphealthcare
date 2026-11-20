@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 TMP="$(mktemp -d)"; mkdir "$TMP/pmp-brain"
-cp -R brain katrina launchd .claude install.sh uninstall.sh do-all.sh README.md "$TMP/pmp-brain/"
+cp -R brain katrina launchd .claude install.sh uninstall.sh do-all.sh local-ai-setup.sh README.md "$TMP/pmp-brain/"
 find "$TMP" -name __pycache__ -prune -exec rm -rf {} +
 {
   cat <<'HEAD'

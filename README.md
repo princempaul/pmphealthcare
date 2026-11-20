@@ -11,6 +11,12 @@ Macs, how they connect, what's open and what was decided. Inside any other Claud
 ask for her by name ("have Katrina check what's open").
 
 - Her instructions: `.claude/agents/katrina.md` (installed to `~/.claude/agents/`)
+- Her helpers, picked by cost: `katrina-scout` (Haiku, read-only lookups), `katrina-builder`
+  (Sonnet, scoped changes on a branch), `katrina-checker` (Sonnet, reviews before anything is
+  pushed). Katrina plans and checks; the helpers do the legwork, so most tokens go to the
+  cheaper models.
+- The installer allows `brain.py` and reads of `~/PMPBrain` in `~/.claude/settings.json`, so
+  lookups don't stop for a permission prompt.
 - Her memory: `~/PMPBrain` (below)
 - The cloud side she watches: `katrina/registry.md`
 
@@ -21,6 +27,26 @@ python3 ~/PMPBrain/brain.py xref web-request     # one service: every project th
 python3 ~/PMPBrain/brain.py machines             # when each Mac last checked in
 python3 ~/PMPBrain/brain.py note pmp-portal "Keep web-request public"   # a decision, shared to the other Mac
 ```
+
+### Katrina without a Claude subscription
+
+`katrina-local` is Katrina on a model that runs on the Mac itself: free, offline, and nothing
+leaves the machine. Run `./local-ai-setup.sh` once. It reads the Mac's chip and memory, installs
+Ollama, downloads the model that fits, and offers opencode, a free coding agent that follows
+Katrina's rules.
+
+| Mac | Model it picks | What to expect |
+| --- | --- | --- |
+| Apple Silicon, 32 GB+ | qwen3.6:35b | Close to useful for small edits too |
+| Apple Silicon, 24 GB | gpt-oss:20b | Good lookups, careful small edits |
+| Apple Silicon, 16 GB | qwen3.5:9b | Good lookups and summaries, about 20 words a second |
+| Apple Silicon, 8 GB | qwen3.5:4b | Lookups and short answers |
+| Intel iMac | qwen3.5:4b | Slow; questions about projects only |
+
+`katrina-local` can look things up (the brain, files in your home folder, git state) and keep a
+note. It can't edit, run commands or reach the internet; keys and system folders are blocked. A
+local model is much weaker than Claude at long multi-step jobs, so keep Katrina (Claude) for real
+changes and use the local one for quick questions, offline work, or when the subscription is off.
 
 ### How the cross-referencing works
 

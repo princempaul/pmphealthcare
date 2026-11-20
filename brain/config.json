@@ -526,5 +526,9 @@
       "kind": "reads and files into",
       "note": "reads last night's review, the index and the Launch board"
     }
-  ]
+  ],
+  "local": {
+    "base_url": "http://localhost:11434/v1",
+    "model": "auto"
+  }
 }
