@@ -28,7 +28,8 @@ DEFAULTS = {
     "base_url": "http://localhost:11434/v1",
     "model": "auto",
     # first one installed wins when model is "auto"; bigger and newer first
-    "prefer": ["qwen3:32b", "gpt-oss:20b", "qwen3:14b", "qwen3:8b", "llama3.1:8b", "qwen3:4b", "llama3.2:3b"],
+    "prefer": ["qwen3.6:35b", "qwen3.8:27b", "gpt-oss:20b", "qwen3.5:9b", "gemma4:12b", "qwen3.5:4b",
+               "gemma4:e4b", "qwen3.5:2b", "qwen3:8b", "llama3.1:8b"],
     "max_rounds": 8,
     "context_chars": 6000,
     "timeout": 600,
@@ -171,7 +172,7 @@ def installed_models(cfg):
 
 
 def pick_model(cfg):
-    have = installed_models(cfg)
+    have = [m for m in installed_models(cfg) if "cloud" not in m]   # cloud models send data off the Mac
     if cfg["model"] != "auto":
         return cfg["model"]
     for m in cfg["prefer"]:
@@ -179,7 +180,7 @@ def pick_model(cfg):
             return m
     if have:
         return have[0]
-    raise RuntimeError("The local runtime has no model yet. Run: ollama pull qwen3:8b")
+    raise RuntimeError("The local runtime has no model yet. Run: ~/pmp-brain-src/local-ai-setup.sh")
 
 
 def system_prompt(cfg):

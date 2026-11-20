@@ -28,6 +28,26 @@ python3 ~/PMPBrain/brain.py machines             # when each Mac last checked in
 python3 ~/PMPBrain/brain.py note pmp-portal "Keep web-request public"   # a decision, shared to the other Mac
 ```
 
+### Katrina without a Claude subscription
+
+`katrina-local` is Katrina on a model that runs on the Mac itself: free, offline, and nothing
+leaves the machine. Run `./local-ai-setup.sh` once. It reads the Mac's chip and memory, installs
+Ollama, downloads the model that fits, and offers opencode, a free coding agent that follows
+Katrina's rules.
+
+| Mac | Model it picks | What to expect |
+| --- | --- | --- |
+| Apple Silicon, 32 GB+ | qwen3.6:35b | Close to useful for small edits too |
+| Apple Silicon, 24 GB | gpt-oss:20b | Good lookups, careful small edits |
+| Apple Silicon, 16 GB | qwen3.5:9b | Good lookups and summaries, about 20 words a second |
+| Apple Silicon, 8 GB | qwen3.5:4b | Lookups and short answers |
+| Intel iMac | qwen3.5:4b | Slow; questions about projects only |
+
+`katrina-local` can look things up (the brain, files in your home folder, git state) and keep a
+note. It can't edit, run commands or reach the internet; keys and system folders are blocked. A
+local model is much weaker than Claude at long multi-step jobs, so keep Katrina (Claude) for real
+changes and use the local one for quick questions, offline work, or when the subscription is off.
+
 ### How the cross-referencing works
 
 Every night each Mac reads the text files of each project (never the clinical lane, never `.env`
