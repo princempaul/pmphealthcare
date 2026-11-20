@@ -1,6 +1,6 @@
 # Katrina's registry: the cloud side and what feeds what
 
-Checked 2026-11-18, updated 2026-11-20. The Macs' own projects are in `~/PMPBrain/CONTEXT.md`; this file covers what
+Checked 2026-11-18, updated 2026-11-20 (clinic site source settled). The Macs' own projects are in `~/PMPBrain/CONTEXT.md`; this file covers what
 doesn't live on a Mac. This repo is public, so there are no account ids, no figures and nothing
 about patients here. Live state is always the connector, not this page.
 
@@ -10,7 +10,7 @@ about patients here. Live state is always the connector, not this page.
 | --- | --- | --- |
 | pmphealthcare.ca | GitHub Pages, `princempaul/pmphealthcare.ca`, branch `main` | Supabase edge function `web-request` for the booking form (email fallback) |
 | app.pmphealthcare.ca | GitHub Pages, `princempaul/pmp-portal`, branch `main` | Supabase project `pmp-portal` for sign-in, data and functions; Jitsi for video |
-| bluewatermetabolic.ca | Cloudflare account bluewatermetabolic.ca; source `clinic-site` on the iMac, backup in private repo `princempaul/bluewater-clinic-site` | Jane for booking |
+| bluewatermetabolic.ca | Cloudflare Pages, account bluewatermetabolic.ca; source is the private repo `princempaul/bluewatermetabolic` | Jane for booking |
 | team.bluewatermetabolic.ca | Cloudflare (team app) | D1 `bluewater-ops` |
 
 A push to `main` on either GitHub Pages repo is live within a minute. There is no staging.
@@ -33,8 +33,9 @@ D1 on the bluewatermetabolic.ca account: `bluewater-ops`, `bluewater-voice`.
 ## GitHub (princempaul)
 
 `pmphealthcare.ca` (public, site), `pmp-portal` (public, portal), `pmphealthcare` (public, this
-brain and Katrina), `bluewater-clinic-site` (private, clinic site backup), `bluewatermetabolic`
-(private; which of these two is the live clinic source is not settled).
+brain and Katrina), `bluewatermetabolic` (private, the live clinic site; edit it here).
+`bluewater-clinic-site` (private) is the old September preview build, superseded: archive it, don't
+edit it. The iMac's `~/Desktop/Virtual Clinic/clinic-site` is the same old preview.
 
 ## Notion "PMP Operator" (system of record)
 

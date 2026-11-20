@@ -363,7 +363,7 @@
       "patterns": [
         "(?<![\\w.-])bluewatermetabolic\\.ca"
       ],
-      "note": "Clinic site, Cloudflare account bluewatermetabolic.ca."
+      "note": "Live clinic site. Source: private repo princempaul/bluewatermetabolic (static pages, Cloudflare Pages). The old preview repo bluewater-clinic-site is superseded."
     },
     {
       "id": "domain:team.bluewatermetabolic.ca",
@@ -497,10 +497,16 @@
       "note": "brain.db mirrors the Project & conversation index"
     },
     {
-      "from": "clinic-site",
+      "from": "bluewatermetabolic",
       "to": "bluewatermetabolic.ca",
       "kind": "is the source of",
-      "note": "backed up to private repo princempaul/bluewater-clinic-site"
+      "note": "private repo, Cloudflare Pages; edit the clinic site here"
+    },
+    {
+      "from": "clinic-site",
+      "to": "bluewatermetabolic",
+      "kind": "superseded by",
+      "note": "old Sept preview (backed up as bluewater-clinic-site); don't edit"
     },
     {
       "from": "bluewatermetabolic.ca",
