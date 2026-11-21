@@ -998,7 +998,7 @@ def write_report(con, alerts, counts):
     return path
 
 
-def backup():
+def backup(cfg=None):
     os.makedirs(BACKUPS, exist_ok=True)
     dst = os.path.join(BACKUPS, "brain-%s.db" % today())
     src = sqlite3.connect(DB)
@@ -1009,6 +1009,14 @@ def backup():
     keep = sorted(glob.glob(os.path.join(BACKUPS, "brain-*.db")))
     for old in keep[:-14]:
         os.remove(old)
+    # one copy off this Mac, in iCloud Drive (or shared_dir), replaced nightly. No patient data is ever in it.
+    d = shared_dir(cfg or load_config())
+    if d:
+        try:
+            os.makedirs(os.path.join(d, "backups"), exist_ok=True)
+            shutil.copy2(dst, os.path.join(d, "backups", machine_name() + "-brain.db"))
+        except OSError:
+            pass
 
 
 def notify(title, msg):
@@ -1060,7 +1068,7 @@ def cmd_nightly():
                     (now().isoformat(), n_proj, n_new, len(alerts), run_id))
         con.commit()
         con.close()
-        backup()
+        backup(cfg)
         print("Nightly done:", report)
     except Exception as e:
         notes.append(repr(e))
