@@ -716,6 +716,39 @@ def build_search(con):
 
 # ---------------------------------------------------------------- verification
 
+def token_checks(con, cfg):
+    """Daily, free (no AI call): things that make every Claude session slower and costlier."""
+    out = []
+    lim = cfg.get("limits", {})
+    big = lim.get("instructions_kb", 8) * 1024
+    # instruction files load into every session: keep them short
+    files = [os.path.join(HOME, ".claude", "CLAUDE.md")]
+    files += [os.path.join(r["path"], "CLAUDE.md") for r in con.execute("SELECT path FROM projects WHERE active=1 AND has_claude_md=1")]
+    for f in files:
+        try:
+            size = os.path.getsize(f)
+        except OSError:
+            continue
+        if size > big:
+            out.append(("WATCH", "Token use", "%s is %d KB and loads into every session there. Trim it under %d KB or move detail into files read on demand."
+                        % (f.replace(HOME, "~"), size // 1024, big // 1024)))
+    try:
+        size = os.path.getsize(CONTEXT)
+        if size > cfg.get("limits", {}).get("context_chars", 6000) * 1.2:
+            out.append(("WATCH", "Token use", "CONTEXT.md is %d KB, over its budget. Lower limits.context_chars or trim profile.md." % (size // 1024)))
+    except OSError:
+        pass
+    # very long conversations re-send their whole history every turn
+    since = (now() - dt.timedelta(days=7)).isoformat()
+    long_n = lim.get("long_session_messages", 150)
+    rows = con.execute("SELECT title, messages FROM conversations WHERE ended >= ? AND messages > ? ORDER BY messages DESC",
+                       (since, long_n)).fetchall()
+    if rows:
+        out.append(("INFO", "Token use", "%d Claude Code chat(s) this week ran past %d messages (longest: %d, \"%s\"). Start a new chat per topic, or /clear, to cut cost."
+                    % (len(rows), long_n, rows[0]["messages"], (rows[0]["title"] or "untitled")[:60])))
+    return out
+
+
 def verify(con, cfg):
     """Return list of (level, area, message)."""
     out = []
@@ -809,6 +842,7 @@ def verify(con, cfg):
             out.append(("INFO", "Mac", "%d files in Downloads older than 30 days. Worth a clear-out." % len(old)))
 
     out += peer_checks(con, cfg)
+    out += token_checks(con, cfg)
 
     # PHI wall check on the database itself
     leaks = 0

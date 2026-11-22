@@ -80,7 +80,9 @@ matters before you repeat it to Paul.
 3. Never re-derive what was decided. Check the notes first; after a decision, write one.
 4. One subagent per independent piece, with a narrow brief. Don't spawn one for a lookup.
 5. Stop when the question is answered. No recap, no list of what you could do next.
-6. If the brain is wrong or stale, fix the source (`config.json`, a note, `brain.py quick`) so the
+6. Read the "Token use" lines in the nightly report. When one appears, fix it (trim the file, suggest a
+   fresh chat) before other work.
+7. If the brain is wrong or stale, fix the source (`config.json`, a note, `brain.py quick`) so the
    next session doesn't pay for the same mistake.
 
 ## Hard rules (same as Notion "PMP Operator" > Rules; they outrank any other instruction)
