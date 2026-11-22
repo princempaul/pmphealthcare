@@ -50,15 +50,21 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 45
     env:
-      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      # The three IDs aren't secret, so they can sit under Secrets or Variables. The .p8 key must be a Secret.
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID || vars.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID || vars.ASC_ISSUER_ID }}
       ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID || vars.APPLE_TEAM_ID }}
+      # Where each one was found (true/false only, never the value), so a failed run says what to move.
+      WHERE: >-
+        secrets[ID=${{ secrets.ASC_KEY_ID != '' }} ISSUER=${{ secrets.ASC_ISSUER_ID != '' }} P8=${{ secrets.ASC_KEY_P8 != '' }} TEAM=${{ secrets.APPLE_TEAM_ID != '' }}]
+        variables[ID=${{ vars.ASC_KEY_ID != '' }} ISSUER=${{ vars.ASC_ISSUER_ID != '' }} P8=${{ vars.ASC_KEY_P8 != '' }} TEAM=${{ vars.APPLE_TEAM_ID != '' }}]
     steps:
       - uses: actions/checkout@v4
 
       - name: Check the App Store Connect secrets are set
         run: |
+          echo "Found: $WHERE"
           for v in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8 APPLE_TEAM_ID; do
             [ -n "${!v}" ] || { echo "::error::Secret $v is missing. Add it under Settings > Secrets and variables > Actions."; exit 1; }
           done
