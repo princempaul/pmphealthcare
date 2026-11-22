@@ -18,7 +18,7 @@ targets:
     info:
       path: Katrina/Info.plist
       properties:
-        CFBundleDisplayName: Katrina
+        CFBundleDisplayName: Katrina PA
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         LSApplicationCategoryType: public.app-category.productivity

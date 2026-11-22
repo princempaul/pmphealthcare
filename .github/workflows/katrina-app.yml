@@ -1,0 +1,107 @@
+name: Katrina app build
+
+on:
+  push:
+    paths: ["apps/Katrina/**", ".github/workflows/katrina-app.yml"]
+  pull_request:
+    paths: ["apps/Katrina/**", ".github/workflows/katrina-app.yml"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        destination: ["generic/platform=iOS Simulator", "generic/platform=macOS"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use the newest Xcode on the runner
+        run: |
+          ls -d /Applications/Xcode*.app || true
+          X=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$X" ] && sudo xcode-select -s "$X"
+          xcodebuild -version
+
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          cd apps/Katrina && xcodegen generate
+
+      - name: Build (${{ matrix.destination }})
+        run: |
+          set -o pipefail
+          cd apps/Katrina
+          xcodebuild -project Katrina.xcodeproj -scheme Katrina \
+            -destination '${{ matrix.destination }}' \
+            CODE_SIGNING_ALLOWED=NO build 2>&1 | tee build.log | grep -E "error:|warning:|\*\* BUILD" || true
+          grep -q "BUILD SUCCEEDED" build.log
+
+      - name: Show the errors
+        if: failure()
+        run: grep -E "error:" -A3 apps/Katrina/build.log | head -150 || true
+
+  testflight:
+    # Runs by hand (Actions > Katrina app build > Run workflow) once the App Store Connect secrets exist.
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the App Store Connect secrets are set
+        run: |
+          for v in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8 APPLE_TEAM_ID; do
+            [ -n "${!v}" ] || { echo "::error::Secret $v is missing. Add it under Settings > Secrets and variables > Actions."; exit 1; }
+          done
+
+      - name: Use the newest Xcode and generate the project
+        run: |
+          X=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1); [ -n "$X" ] && sudo xcode-select -s "$X"
+          xcodebuild -version
+          brew install xcodegen
+          cd apps/Katrina && xcodegen generate
+
+      - name: Archive for iPhone (signed with the API key)
+        run: |
+          set -o pipefail
+          mkdir -p ~/private_keys
+          printf '%s' "$ASC_KEY_P8" > ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          cd apps/Katrina
+          xcodebuild archive -project Katrina.xcodeproj -scheme Katrina \
+            -destination 'generic/platform=iOS' -archivePath build/Katrina.xcarchive \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${ASC_KEY_ID}.p8 \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            2>&1 | tee archive.log | grep -E "error:|\*\* ARCHIVE" || true
+          grep -q "ARCHIVE SUCCEEDED" archive.log
+
+      - name: Upload to TestFlight
+        run: |
+          set -o pipefail
+          cd apps/Katrina
+          xcodebuild -exportArchive -archivePath build/Katrina.xcarchive \
+            -exportOptionsPlist ExportOptions.plist -exportPath build/export \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${ASC_KEY_ID}.p8 \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            2>&1 | tee export.log | grep -E "error:|Upload|EXPORT" || true
+          grep -qE "EXPORT SUCCEEDED|Upload succeeded" export.log
+          echo "Uploaded build ${{ github.run_number }}. It appears in TestFlight after Apple's processing (usually 5-30 minutes)."
+
+      - name: Remove the key file
+        if: always()
+        run: rm -rf ~/private_keys
+
+      - name: Show the errors
+        if: failure()
+        run: grep -hE "error:" -A3 apps/Katrina/archive.log apps/Katrina/export.log 2>/dev/null | head -150 || true
