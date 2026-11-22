@@ -159,4 +159,11 @@ reports and backups are git-ignored and never committed.
   claude.ai chats aren't listed by any tool yet.
 - If the iMac is off (not just asleep) at 23:30, the check runs the next time it starts up.
 
+## Backups
+
+Each night the database is copied to `~/PMPBrain/backups` (14 days kept) and one copy per Mac goes
+to iCloud Drive > PMPBrain > backups (`<Mac name>-brain.db`). To restore on a new Mac: install, then
+copy that file over `~/PMPBrain/brain.db`. The database holds no patient data. It is not a backup
+of your files: for those, the iMac still needs Time Machine on an external drive.
+
 Remove the schedule any time with `./uninstall.sh` (your database stays).

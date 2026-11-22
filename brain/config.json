@@ -247,6 +247,38 @@
     "assistant": {
       "value": "Personal Assistant Katrina: ~/.claude/agents/katrina.md on both Macs. Start with the `katrina` command.",
       "category": "Operator & automation"
+    },
+    "mac.imac": {
+      "value": "27-inch iMac 2017, Intel i5 3.4 GHz, 16 GB, macOS 13.7.8 Ventura (last macOS it can run). Runs PMP Brain and Katrina (Claude Code installed Nov 19). Can't run Ollama or Xcode 26.",
+      "category": "Operator & automation"
+    },
+    "mac.macbook": {
+      "value": "MacBook Pro (Princes-MacBook-Pro). Chip and macOS not yet confirmed; it's the candidate for local AI and app building. Holds ~/Desktop/BWMWC (clinic files, reels).",
+      "category": "Operator & automation"
+    },
+    "site.clinic.source": {
+      "value": "bluewatermetabolic.ca source is the private repo princempaul/bluewatermetabolic (Cloudflare Pages). princempaul/bluewater-clinic-site is the old Sept preview, archived on GitHub Nov 21.",
+      "category": "Websites & SEO"
+    },
+    "tasks.model_policy": {
+      "value": "Scheduled-task models: Haiku 5.5 for simple jobs (team app relay, website health check); Sonnet 5.5 for briefs, SEO, money close, career scout; Fable only for clinical guideline work and the social posting run. Tasks that drive Chrome on the Mac (visibility check, Search Console, social) can only have their model changed from the Mac.",
+      "category": "Operator & automation"
+    },
+    "notion.index": {
+      "value": "Notion Project & conversation index: collection://defda184-c46d-4a77-9b06-4ea9fec7adb1. Launch board: collection://1743142f-55b6-4f64-aed4-64643ccded9c.",
+      "category": "Operator & automation"
+    },
+    "katrina.phone": {
+      "value": "Katrina phone app (read-only, private): https://claude.ai/artifact/LdZSAn9ZvPHT6uuhPb9qBF",
+      "category": "Operator & automation"
+    },
+    "apple.developer": {
+      "value": "Enrolled in the Apple Developer Program Nov 2026. Before selling: Paid Apps agreement, banking, W-8BEN, Small Business Program. First app candidate: employer due-date tracker for fit tests, TB tests and pre-employment medicals.",
+      "category": "Career & income"
+    },
+    "team.folder": {
+      "value": "Team share folder: ~/Desktop/BWMCS/Files For Team, built by tools/make-team-folder.py (copies only, holds back patient-like files).",
+      "category": "Bluewater clinic"
     }
   },
   "required_paths": [
