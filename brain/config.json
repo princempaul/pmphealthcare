@@ -191,7 +191,9 @@
     "downloads_old": 50,
     "inbox_files": 25,
     "peer_days": 4,
-    "context_chars": 6000
+    "context_chars": 6000,
+    "instructions_kb": 8,
+    "long_session_messages": 150
   },
   "expect_time_machine": true,
   "expect_syncthing": true,
