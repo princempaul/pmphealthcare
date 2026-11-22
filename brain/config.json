@@ -193,7 +193,8 @@
     "peer_days": 4,
     "context_chars": 6000,
     "instructions_kb": 8,
-    "long_session_messages": 150
+    "long_session_messages": 150,
+    "desktop_peer_hours": 3
   },
   "expect_time_machine": true,
   "expect_syncthing": true,
