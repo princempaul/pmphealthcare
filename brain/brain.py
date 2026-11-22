@@ -593,6 +593,9 @@ def export_snapshot(con, cfg):
             "SELECT * FROM alerts WHERE resolved=0 AND level IN ('ACTION','WATCH') AND area NOT LIKE 'Other Mac%'")],
         "notes": [dict(created=r["created"], topic=r["topic"], text=r["text"]) for r in con.execute(
             "SELECT * FROM notes WHERE machine=? ORDER BY created DESC LIMIT 300", (me,))],
+        # for the Katrina app: how things connect, and standing facts (no patient data, no secrets)
+        "map": map_lines(con),
+        "facts": {r["key"]: r["value"] for r in con.execute("SELECT key, value FROM facts")},
     }
     try:
         os.makedirs(os.path.join(d, "machines"), exist_ok=True)
@@ -643,6 +646,30 @@ def import_peers(con, cfg):
                 con.execute("INSERT OR IGNORE INTO notes VALUES (?,?,?,?)",
                             (who, str(t.get("created", ""))[:19], redact(str(t.get("topic", "")))[:80],
                              redact(str(t["text"]))[:600]))
+    return n
+
+
+def import_app_notes(con, cfg):
+    """Notes written by the Katrina app land in <shared>/inbox/*.json. Stored as data, never run."""
+    d = shared_dir(cfg)
+    if not d:
+        return 0
+    n = 0
+    for fp in glob.glob(os.path.join(d, "inbox", "*.json")):
+        try:
+            if os.path.getsize(fp) > 20000:
+                continue
+            with open(fp) as f:
+                t = json.load(f)
+        except Exception:
+            continue
+        text, topic = str(t.get("text", "")), str(t.get("topic", "") or "note")
+        if not text or len(CLINICAL_WORDS.findall(topic + " " + text)) >= 3 or any(p.search(text) for p in PHI_PATTERNS[:3]):
+            continue
+        cur = con.execute("INSERT OR IGNORE INTO notes VALUES (?,?,?,?)",
+                          (re.sub(r"[^A-Za-z0-9_ -]", "", str(t.get("device", "Katrina app")))[:40] or "Katrina app",
+                           str(t.get("created", ""))[:19], redact(topic)[:80], redact(" ".join(text.split()))[:600]))
+        n += cur.rowcount
     return n
 
 
@@ -1135,6 +1162,7 @@ def cmd_nightly():
         n_new = sync_conversations(con, cfg)
         sync_refs(con, cfg)
         import_peers(con, cfg)
+        import_app_notes(con, cfg)
         con.commit()
         alerts = verify(con, cfg)
         con.execute("UPDATE alerts SET resolved=1 WHERE resolved=0")
@@ -1292,6 +1320,7 @@ def cmd_quick():
     new = sync_conversations(con, cfg)
     sync_refs(con, cfg)
     import_peers(con, cfg)
+    import_app_notes(con, cfg)
     export_snapshot(con, cfg)
     synced = sync_claude_config(cfg)
     build_search(con)

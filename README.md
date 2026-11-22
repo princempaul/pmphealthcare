@@ -159,6 +159,12 @@ reports and backups are git-ignored and never committed.
   claude.ai chats aren't listed by any tool yet.
 - If the iMac is off (not just asleep) at 23:30, the check runs the next time it starts up.
 
+## Katrina app (iPhone, iPad, Mac)
+
+`apps/Katrina` is a SwiftUI app: Today, Ask, Projects, Notes, Settings. It reads the summaries both
+Macs write to iCloud Drive > PMPBrain, so everything except "Ask" works with no AI call. Build steps
+are in `apps/Katrina/README.md` (needs a Mac with Xcode 26 and your Apple Developer team).
+
 ## Both Macs, anywhere
 
 - **Claude app and claude.ai chats** sync through your account already; open the same chat on
