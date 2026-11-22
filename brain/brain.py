@@ -593,6 +593,9 @@ def export_snapshot(con, cfg):
             "SELECT * FROM alerts WHERE resolved=0 AND level IN ('ACTION','WATCH') AND area NOT LIKE 'Other Mac%'")],
         "notes": [dict(created=r["created"], topic=r["topic"], text=r["text"]) for r in con.execute(
             "SELECT * FROM notes WHERE machine=? ORDER BY created DESC LIMIT 300", (me,))],
+        # for the Katrina app: how things connect, and standing facts (no patient data, no secrets)
+        "map": map_lines(con),
+        "facts": {r["key"]: r["value"] for r in con.execute("SELECT key, value FROM facts")},
     }
     try:
         os.makedirs(os.path.join(d, "machines"), exist_ok=True)
@@ -646,6 +649,30 @@ def import_peers(con, cfg):
     return n
 
 
+def import_app_notes(con, cfg):
+    """Notes written by the Katrina app land in <shared>/inbox/*.json. Stored as data, never run."""
+    d = shared_dir(cfg)
+    if not d:
+        return 0
+    n = 0
+    for fp in glob.glob(os.path.join(d, "inbox", "*.json")):
+        try:
+            if os.path.getsize(fp) > 20000:
+                continue
+            with open(fp) as f:
+                t = json.load(f)
+        except Exception:
+            continue
+        text, topic = str(t.get("text", "")), str(t.get("topic", "") or "note")
+        if not text or len(CLINICAL_WORDS.findall(topic + " " + text)) >= 3 or any(p.search(text) for p in PHI_PATTERNS[:3]):
+            continue
+        cur = con.execute("INSERT OR IGNORE INTO notes VALUES (?,?,?,?)",
+                          (re.sub(r"[^A-Za-z0-9_ -]", "", str(t.get("device", "Katrina app")))[:40] or "Katrina app",
+                           str(t.get("created", ""))[:19], redact(topic)[:80], redact(" ".join(text.split()))[:600]))
+        n += cur.rowcount
+    return n
+
+
 def peer_checks(con, cfg):
     out = []
     lim = cfg.get("limits", {})
@@ -660,7 +687,14 @@ def peer_checks(con, cfg):
             age = (now() - dt.datetime.fromisoformat(p["generated"])).days
         except ValueError:
             age = 99
-        if age >= lim.get("peer_days", 4):
+        if not p["laptop"]:
+            try:
+                hours = (now() - dt.datetime.fromisoformat(p["generated"])).total_seconds() / 3600
+            except ValueError:
+                hours = 999
+            if hours >= lim.get("desktop_peer_hours", 3):
+                out.append(("ACTION", "Other Mac", "%s (the always-on Mac) last checked in %d hours ago. It may be off, asleep or offline: check power and Wi-Fi." % (p["machine"], hours)))
+        elif age >= lim.get("peer_days", 4):
             out.append(("WATCH", "Other Mac", "%s last checked in %d days ago, so what's listed for it is stale. Open it and let it run." % (p["machine"], age)))
     mine = {}
     for r in con.execute("SELECT * FROM projects WHERE active=1 AND remote!=''"):
@@ -680,6 +714,47 @@ def peer_checks(con, cfg):
               and not r["dirty_files"] and not (r["unpushed"] and r["unpushed"] > 0)):
             out.append(("INFO", r["category"], "%s is on a different commit here than on %s (branch %s). Run git pull on the one that's behind." % (r["name"], pp["machine"], r["branch"])))
     return out
+
+
+CLAUDE_SHARED = ("agents", "skills", "commands")
+
+
+def sync_claude_config(cfg):
+    """Two-way copy of ~/.claude/{agents,skills,commands} through the shared folder.
+    Newest file wins; nothing is ever deleted; credentials and chats are never touched."""
+    d = shared_dir(cfg)
+    if not d:
+        return 0
+    n = 0
+    for sub in CLAUDE_SHARED:
+        local, remote = os.path.join(HOME, ".claude", sub), os.path.join(d, "claude", sub)
+        pairs = {}
+        for base, side in ((local, "l"), (remote, "r")):
+            for dp, dn, fn in os.walk(base):
+                dn[:] = [x for x in dn if not x.startswith(".")]
+                for f in fn:
+                    if f.startswith(".") or f.endswith((".tmp", ".lock")):
+                        continue
+                    rel = os.path.relpath(os.path.join(dp, f), base)
+                    pairs.setdefault(rel, {})[side] = os.path.join(dp, f)
+        for rel, p in pairs.items():
+            src = dst = None
+            if "l" in p and "r" not in p:
+                src, dst = p["l"], os.path.join(remote, rel)
+            elif "r" in p and "l" not in p:
+                src, dst = p["r"], os.path.join(local, rel)
+            else:
+                ml, mr = os.path.getmtime(p["l"]), os.path.getmtime(p["r"])
+                if abs(ml - mr) > 2:
+                    src, dst = (p["l"], p["r"]) if ml > mr else (p["r"], p["l"])
+            if src:
+                try:
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    shutil.copy2(src, dst)
+                    n += 1
+                except OSError:
+                    pass
+    return n
 
 
 # ---------------------------------------------------------------- search index
@@ -1087,6 +1162,7 @@ def cmd_nightly():
         n_new = sync_conversations(con, cfg)
         sync_refs(con, cfg)
         import_peers(con, cfg)
+        import_app_notes(con, cfg)
         con.commit()
         alerts = verify(con, cfg)
         con.execute("UPDATE alerts SET resolved=1 WHERE resolved=0")
@@ -1094,6 +1170,7 @@ def cmd_nightly():
             con.execute("INSERT INTO alerts(run_date,level,area,message) VALUES(?,?,?,?)", (today(), lvl, area, msg))
         con.commit()
         export_snapshot(con, cfg)
+        sync_claude_config(cfg)
         build_search(con)
         con.commit()
         write_context(con, cfg)
@@ -1243,12 +1320,14 @@ def cmd_quick():
     new = sync_conversations(con, cfg)
     sync_refs(con, cfg)
     import_peers(con, cfg)
+    import_app_notes(con, cfg)
     export_snapshot(con, cfg)
+    synced = sync_claude_config(cfg)
     build_search(con)
     con.execute("INSERT OR REPLACE INTO meta VALUES ('quick', ?)", (now().isoformat(),))
     con.commit()
     write_context(con, cfg)
-    print("Quick update: %d projects, %d new conversation(s)." % (n, new))
+    print("Quick update: %d projects, %d new conversation(s), %d Claude config file(s) synced." % (n, new, synced))
 
 
 def cmd_open():

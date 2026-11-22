@@ -159,6 +159,25 @@ reports and backups are git-ignored and never committed.
   claude.ai chats aren't listed by any tool yet.
 - If the iMac is off (not just asleep) at 23:30, the check runs the next time it starts up.
 
+## Katrina app (iPhone, iPad, Mac)
+
+`apps/Katrina` is a SwiftUI app: Today, Ask, Projects, Notes, Settings. It reads the summaries both
+Macs write to iCloud Drive > PMPBrain, so everything except "Ask" works with no AI call. Build steps
+are in `apps/Katrina/README.md` (needs a Mac with Xcode 26 and your Apple Developer team).
+
+## Both Macs, anywhere
+
+- **Claude app and claude.ai chats** sync through your account already; open the same chat on
+  either Mac or the phone.
+- **Claude Code settings:** every hour each Mac swaps `~/.claude/agents`, `skills` and `commands`
+  through iCloud Drive > PMPBrain > claude. The newest copy wins and nothing is deleted. Sign-ins and
+  chat history are never copied.
+- **The iMac stays on:** run `./always-on.sh` once on the iMac. It turns sleep off, restarts after
+  a power cut or freeze, and keeps Claude Code Remote Control running in `~/Claude`, so "Home iMac"
+  shows up in claude.ai/code and the Claude app on the MacBook and iPhone.
+- **You hear when it isn't on:** if the iMac's hourly check-in is more than 3 hours old, the
+  MacBook's check raises it as "Needs you".
+
 ## Backups
 
 Each night the database is copied to `~/PMPBrain/backups` (14 days kept) and one copy per Mac goes
