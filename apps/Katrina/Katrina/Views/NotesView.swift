@@ -8,8 +8,7 @@ struct NotesView: View {
     @State private var failed = false
 
     var body: some View {
-        NavigationStack {
-            List {
+        List {
                 Section {
                     TextField("Project or topic", text: $topic)
                     TextField("Decision or reminder", text: $text, axis: .vertical).lineLimit(2...6)
@@ -30,7 +29,6 @@ struct NotesView: View {
             }
             .refreshable { await brain.reload() }
             .navigationTitle("Notes")
-        }
     }
 
     private func save() {

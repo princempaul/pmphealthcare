@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.pmphealthcare.brain.crew</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>__HOME__/PMPBrain/crew.py</string>
+    <string>tick</string>
+  </array>
+  <key>StartInterval</key><integer>20</integer>
+  <key>RunAtLoad</key><true/>
+  <!-- missions keep running after the 20-second tick ends -->
+  <key>AbandonProcessGroup</key><true/>
+  <key>StandardOutPath</key><string>__HOME__/PMPBrain/logs/crew.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/PMPBrain/logs/crew.err</string>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>__HOME__/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin</string></dict>
+</dict>
+</plist>

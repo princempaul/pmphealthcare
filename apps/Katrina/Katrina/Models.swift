@@ -84,3 +84,96 @@ extension Date {
         return nil
     }
 }
+
+// MARK: - Fleet: what each Mac's ground crew writes to PMPBrain/fleet/<Mac>.json every 20 seconds (crew.py)
+
+struct FleetSnapshot: Decodable, Identifiable, Hashable {
+    let machine: String
+    let laptop: Bool?
+    let generated: String
+    let paired: Bool?
+    let host: MacHealth?
+    let sessions: [Session]
+    let missions: [Mission]
+
+    var id: String { machine }
+    var generatedDate: Date? { Date.fromBrain(generated) }
+    /// The crew writes every 20 seconds; iCloud adds some delay. Past 3 minutes, call it offline.
+    var isOnline: Bool { generatedDate.map { Date().timeIntervalSince($0) < 180 } ?? false }
+
+    struct MacHealth: Decodable, Hashable {
+        let diskFreeGb: Double?
+        let diskUsedPct: Int?
+        let load: Double?
+        let uptimeH: Double?
+        let macos: String?
+        let batteryPct: Int?
+        let claude: Bool?
+        let brainQuick: String?
+        let brainNightly: String?
+        let brainNightlyOk: Bool?
+
+        enum CodingKeys: String, CodingKey {
+            case load, macos, claude
+            case diskFreeGb = "disk_free_gb", diskUsedPct = "disk_used_pct", uptimeH = "uptime_h"
+            case batteryPct = "battery_pct", brainQuick = "brain_quick", brainNightly = "brain_nightly"
+            case brainNightlyOk = "brain_nightly_ok"
+        }
+    }
+
+    /// A Claude Code conversation on that Mac in the last 24 hours. Titles only; clinical ones are blanked.
+    struct Session: Decodable, Hashable, Identifiable {
+        let id: String
+        let project: String
+        let title: String
+        let category: String?
+        let started: String?
+        let last: String?
+        let messages: Int?
+        let state: String          // active | waiting | idle
+        let mission: String?
+
+        var lastDate: Date? { last.flatMap(Date.fromBrain) }
+        var projectName: String { (project as NSString).lastPathComponent }
+    }
+
+    /// Work Paul delegated from the phone. States: queued, running, done, needs_approval, pushed, failed, stopped, discarded, closed.
+    struct Mission: Decodable, Hashable, Identifiable {
+        let id: String
+        let mode: String?
+        let project: String?
+        let projectName: String?
+        let prompt: String?
+        let created: String?
+        let started: String?
+        let finished: String?
+        let updated: String?
+        let state: String
+        let result: String?
+        let turns: [Turn]?
+        let branch: String?
+        let commits: Int?
+        let diffstat: String?
+        let compare: String?
+        let repo: String?
+        let costUsd: Double?
+        let numTurns: Int?
+        let error: String?
+
+        struct Turn: Decodable, Hashable {
+            let who: String
+            let text: String
+        }
+
+        var isWork: Bool { mode == "work" }
+        var isLive: Bool { state == "running" || state == "queued" }
+        var createdDate: Date? { created.flatMap(Date.fromBrain) }
+        var title: String { (prompt ?? "").isEmpty ? "Mission" : prompt! }
+
+        enum CodingKeys: String, CodingKey {
+            case id, mode, project, prompt, created, started, finished, updated, state, result, turns
+            case branch, commits, diffstat, compare, repo, error
+            case projectName = "project_name", costUsd = "cost_usd", numTurns = "num_turns"
+        }
+    }
+}

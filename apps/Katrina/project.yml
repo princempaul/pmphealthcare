@@ -7,7 +7,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.10"
-    MARKETING_VERSION: "1.0"
+    MARKETING_VERSION: "2.0"
     CURRENT_PROJECT_VERSION: "1"
     DEVELOPMENT_TEAM: ""          # set your Apple Developer Team ID in Xcode > Signing
 targets:
@@ -19,12 +19,17 @@ targets:
       path: Katrina/Info.plist
       properties:
         CFBundleDisplayName: Katrina PA
+        # XcodeGen otherwise writes a fixed "1.0" / "1"; the upload sets the build number per run
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
         # iPad multitasking needs all four; iPhone keeps upside-down off.
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         UISupportedInterfaceOrientations~iphone: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         LSApplicationCategoryType: public.app-category.productivity
+        UIBackgroundModes: [fetch]
+        BGTaskSchedulerPermittedIdentifiers: [ca.pmphealthcare.katrina.refresh]
         ITSAppUsesNonExemptEncryption: false
     entitlements:
       path: Katrina/Katrina.entitlements
