@@ -1,0 +1,6 @@
+{
+  "permissions": {
+    "allow": ["mcp__claude-in-chrome", "Read(~/Jane/**)"],
+    "deny": ["Bash", "Write", "Edit", "NotebookEdit", "WebFetch", "WebSearch"]
+  }
+}

@@ -412,7 +412,8 @@ def sync_conversations(con, cfg):
                 continue
             blob = " ".join([s["title"], s["first_user"], s["sample"], s["project_path"]])
             cat = categorize(blob, cfg)
-            clinical = cat == "Clinical documentation" or len(CLINICAL_WORDS.findall(blob)) >= 4
+            clinical = (cat == "Clinical documentation" or len(CLINICAL_WORDS.findall(blob)) >= 4
+                        or os.path.basename((s["project_path"] or "").rstrip("/")) == "Jane")   # Jane desk: never kept
             if clinical:
                 cat = "Clinical documentation"
                 summary = ""          # never keep clinical text
