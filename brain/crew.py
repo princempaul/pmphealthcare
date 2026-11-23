@@ -11,6 +11,7 @@ Every 20 seconds (launchd) it:
   crew.py pair          show this Mac's pairing code (makes one the first time)
   crew.py pair CODE     use a specific code (normally not needed: Macs and phone share it through iCloud)
   crew.py status        what's running
+  crew.py github-login  one-time: give this Mac a GitHub login for PRs, builds and pushes
 
 Safety, by design:
   - An order runs only if its HMAC matches the pairing code. Anything else in iCloud is ignored.
@@ -549,7 +550,7 @@ def github_status(force=False):
     st["checked_ts"] = time.time()
     st["checked"] = now_iso()
     if not token:
-        st.update(ok=False, repos=[], error="This Mac has no GitHub login stored for git.")
+        st.update(ok=False, repos=[], error="No GitHub login on %s yet. On it, in Terminal: python3 ~/PMPBrain/crew.py github-login" % brain.machine_name())
     else:
         slugs = sorted({github_slug(v[2]) for v in known_projects().values() if github_slug(v[2])})
         st.update(ok=True, error="", repos=[gh_repo(sl, token) for sl in slugs])
@@ -889,6 +890,51 @@ def cmd_status():
     return 0
 
 
+TOKEN_PAGE = ("https://github.com/settings/personal-access-tokens/new?name=Katrina%20iMac"
+              "&description=Katrina%20crew%3A%20PRs%2C%20builds%2C%20mission%20pushes"
+              "&expires_in=365&contents=write&pull_requests=write&actions=write")
+
+
+def cmd_github_login():
+    """One-time: give this Mac a GitHub login (Keychain), so the crew can watch PRs and builds and push missions."""
+    if github_token():
+        code, me = gh_api("GET", "/user", github_token())
+        if code == 200:
+            print("Already signed in to GitHub as %s. Nothing to do." % me.get("login"))
+            github_status(force=True)
+            return 0
+    print("Opening GitHub's token page with the settings already filled in.")
+    print("Check: repository access = your repos, then click Generate token and Copy.")
+    if sys.platform == "darwin":
+        subprocess.run(["open", TOKEN_PAGE])
+    else:
+        print(TOKEN_PAGE)
+    try:
+        input("When the token is copied, come back here and press Return... ")
+    except EOFError:
+        pass
+    token = brain.run(["pbpaste"]).strip() if sys.platform == "darwin" else input("Token: ").strip()
+    if not re.match(r"^(github_pat_|ghp_|gho_)[A-Za-z0-9_]{20,}$", token):
+        print("The clipboard doesn't hold a GitHub token (it should start with github_pat_). Copy it and run this again.")
+        return 1
+    code, me = gh_api("GET", "/user", token)
+    if code != 200:
+        print("GitHub didn't accept that token (%s). Make a new one and run this again." % code)
+        return 1
+    brain.run(["git", "config", "--global", "credential.helper", "osxkeychain"]) if sys.platform == "darwin" else None
+    p = subprocess.run(["git", "credential", "approve"], text=True, capture_output=True,
+                       input="protocol=https\nhost=github.com\nusername=%s\npassword=%s\n\n" % (me.get("login", ""), token))
+    if sys.platform == "darwin":
+        subprocess.run(["pbcopy"], input="", text=True)          # don't leave the token on the clipboard
+    if p.returncode != 0 or github_token() != token:
+        print("Couldn't save it in the Keychain: %s" % (p.stderr.strip() or "git credential helper missing"))
+        return 1
+    st = github_status(force=True)
+    print("Signed in to GitHub as %s and saved in the Keychain. Watching %d repo(s)." % (me.get("login"), len(st.get("repos") or [])))
+    print("Your phone shows pull requests and builds within a minute.")
+    return 0
+
+
 def main(argv):
     c = argv[1] if len(argv) > 1 else "tick"
     if c == "tick":
@@ -897,6 +943,8 @@ def main(argv):
         return cmd_pair(argv[2] if len(argv) > 2 else None)
     if c == "status":
         return cmd_status()
+    if c == "github-login":
+        return cmd_github_login()
     print(__doc__)
     return 1
 
