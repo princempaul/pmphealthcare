@@ -103,6 +103,10 @@ echo
 echo "Done. Tonight's report: $DEST/reports/. Phone copy: iCloud Drive > PMPBrain > latest-nightly.md"
 echo "Tip: give /usr/bin/python3 Full Disk Access (System Settings > Privacy & Security) so the Time Machine check works."
 echo "Free local Katrina (no Claude needed): run ./local-ai-setup.sh once, then: katrina-local"
+if ! pmset -g batt 2>/dev/null | grep -q InternalBattery; then
+  echo; echo "Jane desk (works in Jane through Chrome; talk to it from the Claude app):"
+  /bin/bash "$SRC/jane-desk.sh" || echo "Jane desk didn't start; run ./jane-desk.sh later."
+fi
 echo
 echo "Katrina PA command centre: your phone pairs itself through iCloud. The code, in case you need it:"
 /usr/bin/python3 "$DEST/crew.py" pair

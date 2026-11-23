@@ -692,6 +692,19 @@ def src_dir():
     return os.path.join(HOME, "pmp-brain-src")
 
 
+def jane_desk_stale(src):
+    """Re-run the Jane desk setup only when its rules changed or it isn't running, so a live chat isn't cut off."""
+    def same(a, b):
+        try:
+            with open(a, "rb") as x, open(b, "rb") as y:
+                return x.read() == y.read()
+        except OSError:
+            return False
+    running = subprocess.run(["launchctl", "list", "com.pmphealthcare.jane"], capture_output=True).returncode == 0
+    return not (running and same(os.path.join(src, "jane", "CLAUDE.md"), os.path.join(HOME, "Jane", "CLAUDE.md"))
+                and same(os.path.join(src, "jane", "settings.json"), os.path.join(BASE, "jane-settings.json")))
+
+
 def self_update():
     """Every 6 hours: fast-forward the pmphealthcare checkout and refresh the brain, crew and Katrina files.
     Only when the checkout is clean and the update is a plain fast-forward; never touches Paul's own edits."""
@@ -722,6 +735,10 @@ def self_update():
                             shutil.copy2(s_, dst + ".new")
                             os.replace(dst + ".new", dst)
                     st["updated"] = now_iso()
+                    # the always-on Mac also keeps the Jane desk current (rules and service)
+                    desk = os.path.join(src, "jane-desk.sh")
+                    if not brain.is_laptop() and os.path.isfile(desk) and sys.platform == "darwin" and jane_desk_stale(src):
+                        subprocess.run(["/bin/bash", desk], capture_output=True, timeout=120)
                 else:
                     st["error"] = clean(out, 200)
         _, head = git(["rev-parse", "--short", "HEAD"], src)
@@ -875,7 +892,8 @@ def sessions(cfg, mission_sids):
             s = brain.parse_session(fp)
             blob = " ".join([s["title"], s["first_user"], s["sample"], s["project_path"]])
             cat = brain.categorize(blob, cfg)
-            clinical = cat == "Clinical documentation" or len(brain.CLINICAL_WORDS.findall(blob)) >= 4
+            clinical = (cat == "Clinical documentation" or len(brain.CLINICAL_WORDS.findall(blob)) >= 4
+                        or os.path.basename((s["project_path"] or "").rstrip("/")) == "Jane")   # Jane desk: never shared
             title = "Clinical session (content not stored)" if clinical else clean(s["title"] or s["first_user"], 90)
             role, waiting = last_event(fp)
             c = dict(mtime=mt, id=s["session_id"], project=(s["project_path"] or "").replace(HOME, "~"),
@@ -921,6 +939,8 @@ def host():
         except OSError:
             pass
     h["claude"] = bool(claude_bin())
+    if sys.platform == "darwin":
+        h["jane_desk"] = subprocess.run(["launchctl", "list", "com.pmphealthcare.jane"], capture_output=True).returncode == 0
     try:
         con = brain.connect()
         q = con.execute("SELECT value FROM meta WHERE key='quick'").fetchone()

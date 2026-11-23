@@ -188,9 +188,11 @@ struct FleetSnapshot: Decodable, Identifiable, Hashable {
         let brainNightly: String?
         let brainNightlyOk: Bool?
         let version: String?
+        let janeDesk: Bool?
 
         enum CodingKeys: String, CodingKey {
             case load, macos, claude, version
+            case janeDesk = "jane_desk"
             case diskFreeGb = "disk_free_gb", diskUsedPct = "disk_used_pct", uptimeH = "uptime_h"
             case batteryPct = "battery_pct", brainQuick = "brain_quick", brainNightly = "brain_nightly"
             case brainNightlyOk = "brain_nightly_ok"

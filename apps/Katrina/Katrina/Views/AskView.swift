@@ -7,6 +7,7 @@ struct DispatchView: View {
     @EnvironmentObject var sites: SiteMonitor
     @EnvironmentObject var chat: ChatStore
     @State private var draft = ""
+    @State private var showJane = false
     @FocusState private var focused: Bool
 
     private let suggestions = [
@@ -43,8 +44,12 @@ struct DispatchView: View {
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
+                ToolbarItem(placement: .navigation) {
+                    Button { showJane = true } label: { Label("Jane", systemImage: "stethoscope") }
+                }
                 ToolbarItem { Button("New") { chat.reset() }.disabled(chat.lines.isEmpty || chat.busy) }
             }
+            .sheet(isPresented: $showJane) { JaneView() }
         }
     }
 
@@ -53,6 +58,19 @@ struct DispatchView: View {
             Text("What do you need done?").font(Theme.display(28))
             Text("Katrina sees both Macs, every Claude session, your missions, repos, builds and sites. Ask anything, or give an order: she'll line it up for your approval.")
                 .foregroundStyle(.secondary)
+            Button { showJane = true } label: {
+                HStack {
+                    Image(systemName: "stethoscope").foregroundStyle(Theme.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Jane desk").font(.subheadline.weight(.semibold))
+                        Text("Notes, forms and bookings in Jane, from the iMac's Chrome").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                }
+                .padding(14).background(Theme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(suggestions, id: \.self) { s in
                     Button { send(s) } label: {

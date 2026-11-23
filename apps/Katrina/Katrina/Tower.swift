@@ -59,6 +59,13 @@ enum TowerBoard {
                                    source: "Fleet"))
         }
 
+        // Jane desk on the always-on Mac.
+        if let mac = brain.commandMac, mac.isOnline, mac.host?.janeDesk == false {
+            items.append(TowerItem(id: "jane-desk-\(mac.machine)", level: .watch, icon: "stethoscope",
+                                   title: "Jane desk isn't running on \(mac.machine)",
+                                   detail: "On the iMac, in Terminal: cd ~/pmp-brain-src && ./jane-desk.sh", source: "Jane"))
+        }
+
         // Disk space: one tap clears caches that rebuild themselves.
         for f in brain.fleet {
             guard let used = f.host?.diskUsedPct, used >= 85, let d = f.disk else { continue }
