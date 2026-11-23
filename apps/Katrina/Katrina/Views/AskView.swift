@@ -160,6 +160,7 @@ struct DispatchView: View {
     /// Tap the mic, speak, pause: it sends by itself and Katrina answers out loud.
     private func dictate() {
         if dictation.state == .listening { dictation.finish(); return }
+        VoiceOutput.shared.stop()
         dictation.onFinished = { text in send(text, spoken: true) }
         dictation.reset()
         Task { await dictation.start() }

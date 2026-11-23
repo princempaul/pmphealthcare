@@ -54,6 +54,7 @@ struct TalkView: View {
         .task { await listen() }
         .onChange(of: input.state) { _, st in
             if case .denied(let why) = st { problem = why; phase = .paused }
+            else if st == .idle && phase == .listening { phase = .paused }   // stopped with nothing heard
         }
         .onDisappear { input.stop(); output.stop() }
     }

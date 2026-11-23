@@ -195,6 +195,13 @@ final class VoiceOutput: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         done = nil
         if synth.isSpeaking { synth.stopSpeaking(at: .immediate) }
         speaking = false
+        Self.releaseAudio()
+    }
+
+    private static func releaseAudio() {
+        #if os(iOS)
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        #endif
     }
 
     nonisolated func speechSynthesizer(_ s: AVSpeechSynthesizer, didFinish u: AVSpeechUtterance) {
@@ -202,6 +209,7 @@ final class VoiceOutput: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             self.speaking = false
             let next = self.done
             self.done = nil
+            Self.releaseAudio()          // let music and podcasts come back up; listening reactivates it
             next?()
         }
     }

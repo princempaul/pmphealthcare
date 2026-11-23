@@ -127,6 +127,7 @@ final class ChatStore: ObservableObject {
 
     /// For Siri, Shortcuts and Talk mode: ask, then return what Katrina said as one plain string.
     func reply(to question: String, voice: Bool = true) async -> String {
+        for _ in 0..<60 where busy { try? await Task.sleep(for: .milliseconds(500)) }
         let before = lines.count
         let proposalsBefore = proposals.count
         await ask(question, brain: BrainStore.shared, github: GitHubStore.shared, sites: SiteMonitor.shared, voice: voice)
@@ -170,6 +171,13 @@ final class ChatStore: ObservableObject {
                     .joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
                 let calls = content.filter { $0["type"] as? String == "tool_use" }
                 if calls.isEmpty || reply["stop_reason"] as? String != "tool_use" {
+                    if !calls.isEmpty {
+                        // cut off mid tool call: close each call so the transcript stays valid for the next question
+                        history.append(["role": "user", "content": calls.map {
+                            ["type": "tool_result", "tool_use_id": $0["id"] as? String ?? "", "content": "Not run: the reply was cut short.",
+                             "is_error": true] as [String: Any]
+                        }])
+                    }
                     lines.append(ChatLine(role: .katrina, text: text.isEmpty ? "(no answer)" : text))
                     if reply["stop_reason"] as? String == "max_tokens" { lines.append(ChatLine(role: .note, text: "The answer was cut short.")) }
                     return
