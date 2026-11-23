@@ -216,6 +216,24 @@ struct TowerView: View {
                 stat("Paired", brain.pairedWith(f) ? "Yes" : (f.paired == true ? "Code differs" : "No"), warn: !brain.pairedWith(f))
                 stat("Projects", snap.map { "\($0.projects.count)" } ?? "–")
             }
+            if let d = f.disk, let places = d.places, !places.isEmpty {
+                DisclosureGroup("Where the space went") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(places.prefix(8), id: \.label) { p in
+                            HStack {
+                                Text(p.label).font(.caption)
+                                Spacer()
+                                Text(p.gb < 0 ? "very large" : String(format: "%.1f GB", p.gb)).font(Theme.mono).foregroundStyle(.secondary)
+                            }
+                        }
+                        if let freed = d.freedGb, freed > 0 {
+                            Text("Last cleanup freed \(String(format: "%.1f", freed)) GB").font(.caption).foregroundStyle(Theme.ok)
+                        }
+                    }
+                    .padding(.top, 6)
+                }
+                .font(.subheadline)
+            }
         }
         .card()
     }

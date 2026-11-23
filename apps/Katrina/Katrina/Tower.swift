@@ -11,6 +11,7 @@ struct TowerItem: Identifiable, Hashable {
         case openPull(machine: String, mission: String, slug: String, branch: String, title: String)
         case merge(slug: String, number: Int)
         case rerun(slug: String, run: Int)
+        case cleanup(machine: String)
         case open(URL)
         case mission(machine: String, id: String)
         case settings
@@ -56,6 +57,24 @@ enum TowerBoard {
             items.append(TowerItem(id: "offline-\(f.machine)-\(mins / 30)", level: .action, icon: "desktopcomputer.trianglebadge.exclamationmark",
                                    title: "\(f.machine) is off the radar", detail: "Its crew last checked in \(mins) min ago. Missions sent now wait until it's back.",
                                    source: "Fleet"))
+        }
+
+        // Disk space: one tap clears caches that rebuild themselves.
+        for f in brain.fleet {
+            guard let used = f.host?.diskUsedPct, used >= 85, let d = f.disk else { continue }
+            let safe = d.safeGb ?? 0
+            let top = (d.places ?? []).filter { $0.gb >= 1 }.prefix(3).map { "\($0.label) \(Int($0.gb.rounded())) GB" }.joined(separator: " · ")
+            if safe >= 0.5 {
+                items.append(TowerItem(id: "disk-\(f.machine)-\(d.checked ?? "")", level: .action, icon: "externaldrive.badge.minus",
+                                       title: "\(f.machine): \(String(format: "%.1f", safe)) GB of throwaway caches can go",
+                                       detail: top.isEmpty ? "Xcode, simulator and download caches. They rebuild themselves." : "Biggest: \(top)",
+                                       source: "Disk \(used)% full",
+                                       primary: (label: "Clear caches", action: .cleanup(machine: f.machine))))
+            } else if !top.isEmpty {
+                items.append(TowerItem(id: "disk-\(f.machine)-\(d.checked ?? "")", level: .watch, icon: "externaldrive",
+                                       title: "\(f.machine) is \(used)% full", detail: "Biggest: \(top). Only you can decide what to delete there.",
+                                       source: "Disk"))
+            }
         }
 
         // Missions.
@@ -208,6 +227,9 @@ enum Dispatcher {
                   let r = repo.runs.first(where: { $0.id == run }) else { return nil }
             try await github.rerun(r, in: repo)
             return "Re-running \(r.name)."
+        case .cleanup(let machine):
+            try brain.send(CrewOrder(kind: .cleanup, machine: machine))
+            return "Sent. \(machine) clears its caches; the freed space shows in a minute or two."
         case .open, .mission, .settings:
             return nil
         }
