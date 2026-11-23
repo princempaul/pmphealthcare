@@ -13,6 +13,7 @@ cp "$SRC/brain/brain.py" "$DEST/brain.py"
 cp "$SRC/brain/config.json" "$DEST/config.default.json"
 cp "$SRC/katrina/registry.md" "$DEST/registry.md"
 cp "$SRC/brain/katrina_local.py" "$DEST/katrina_local.py"
+cp "$SRC/brain/crew.py" "$DEST/crew.py"
 
 # Personal Assistant Katrina: the agent itself, and a `katrina` command to start her.
 mkdir -p "$HOME/.claude/agents" "$DEST/bin"
@@ -67,13 +68,13 @@ fi
 chmod +x "$DEST/brain.py"
 /usr/bin/python3 "$DEST/brain.py" init
 
-for name in nightly morning quick; do
+for name in nightly morning quick crew; do
   plist="$AGENTS/com.pmphealthcare.brain.$name.plist"
   sed "s#__HOME__#$HOME#g" "$SRC/launchd/com.pmphealthcare.brain.$name.plist" > "$plist"
   launchctl bootout "gui/$(id -u)" "$plist" 2>/dev/null || true
   launchctl bootstrap "gui/$(id -u)" "$plist"
 done
-echo "Scheduled: nightly 23:30, morning notification 06:30, quick update every hour"
+echo "Scheduled: nightly 23:30, morning notification 06:30, quick update every hour, crew every 20 seconds"
 
 # Every future Claude Code session on this Mac loads the brain's context.
 mkdir -p "$HOME/.claude"
@@ -101,3 +102,6 @@ echo
 echo "Done. Tonight's report: $DEST/reports/. Phone copy: iCloud Drive > PMPBrain > latest-nightly.md"
 echo "Tip: give /usr/bin/python3 Full Disk Access (System Settings > Privacy & Security) so the Time Machine check works."
 echo "Free local Katrina (no Claude needed): run ./local-ai-setup.sh once, then: katrina-local"
+echo
+echo "Katrina PA command centre: pair your phone with this code (Settings > Pair with your Macs):"
+/usr/bin/python3 "$DEST/crew.py" pair

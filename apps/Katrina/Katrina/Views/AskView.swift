@@ -1,12 +1,21 @@
 import SwiftUI
 
-struct AskView: View {
+/// Dispatch: talk to Katrina. She checks the whole fleet and puts proposed orders in front of Paul as cards.
+struct DispatchView: View {
     @EnvironmentObject var brain: BrainStore
+    @EnvironmentObject var github: GitHubStore
+    @EnvironmentObject var sites: SiteMonitor
     @EnvironmentObject var chat: ChatStore
     @State private var draft = ""
     @FocusState private var focused: Bool
 
-    private let suggestions = ["What's open?", "What needs me today?", "What breaks if I change the booking form?", "Which projects have loose work?"]
+    private let suggestions = [
+        "What needs me right now?",
+        "Status of every project, one line each",
+        "Which Claude sessions are waiting on me?",
+        "Review the portal repo and list the riskiest open issues",
+        "Fix the failing build and open a PR",
+    ]
 
     var body: some View {
         NavigationStack {
@@ -15,7 +24,7 @@ struct AskView: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 14) {
                             if chat.lines.isEmpty { empty }
-                            ForEach(chat.lines) { line in bubble(line).id(line.id) }
+                            ForEach(chat.lines) { line in row(line).id(line.id) }
                             if chat.busy {
                                 HStack(spacing: 8) { ProgressView().controlSize(.small); Text(chat.status).foregroundStyle(.secondary) }.id("busy")
                             }
@@ -24,11 +33,12 @@ struct AskView: View {
                         .frame(maxWidth: 820)
                         .frame(maxWidth: .infinity)
                     }
+                    .scrollDismissesKeyboard(.interactively)
                     .onChange(of: chat.lines.count) { _, _ in withAnimation { proxy.scrollTo(chat.lines.last?.id, anchor: .bottom) } }
                 }
                 composer
             }
-            .navigationTitle("Ask Katrina")
+            .navigationTitle("Dispatch")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
@@ -40,35 +50,45 @@ struct AskView: View {
 
     private var empty: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Ask about any project").font(Theme.display(26))
-            Text("Katrina answers from what your Macs reported, so most questions need no lookups.").foregroundStyle(.secondary)
-            FlowRow(items: suggestions) { s in
-                Button(s) { send(s) }.buttonStyle(.bordered).buttonBorderShape(.capsule)
+            Text("What do you need done?").font(Theme.display(28))
+            Text("Katrina sees both Macs, every Claude session, your missions, repos, builds and sites. Ask anything, or give an order: she'll line it up for your approval.")
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(suggestions, id: \.self) { s in
+                    Button { send(s) } label: {
+                        HStack { Text(s).multilineTextAlignment(.leading); Spacer(); Image(systemName: "arrow.up.right").font(.caption) }
+                            .padding(.horizontal, 14).padding(.vertical, 11)
+                            .background(Theme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
-        .padding(.top, 20)
+        .padding(.top, 16)
     }
 
     @ViewBuilder
-    private func bubble(_ line: ChatLine) -> some View {
+    private func row(_ line: ChatLine) -> some View {
         switch line.role {
         case .paul:
             HStack { Spacer(minLength: 60)
                 Text(line.text).padding(.horizontal, 14).padding(.vertical, 10)
-                    .background(Theme.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .background(Theme.accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
         case .katrina:
             Text(line.text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                 .padding(16).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         case .note:
             Label(line.text, systemImage: "info.circle").font(.callout).foregroundStyle(Theme.watch)
+        case .proposal(let id):
+            if let p = chat.proposals[id] { ProposalCard(proposal: p) }
         }
     }
 
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 10) {
-            TextField("Ask Katrina", text: $draft, axis: .vertical)
-                .lineLimit(1...5).textFieldStyle(.plain).focused($focused)
+            TextField("Ask or give an order", text: $draft, axis: .vertical)
+                .lineLimit(1...6).textFieldStyle(.plain).focused($focused)
                 .padding(.horizontal, 14).padding(.vertical, 10)
                 .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .onSubmit { send(draft) }
@@ -86,7 +106,71 @@ struct AskView: View {
     private func send(_ text: String) {
         let q = text
         draft = ""
-        Task { await chat.ask(q, brain: brain) }
+        Task { await chat.ask(q, brain: brain, github: github, sites: sites) }
+    }
+}
+
+/// An order Katrina lined up. Approve sends it; Cancel drops it.
+struct ProposalCard: View {
+    @EnvironmentObject var brain: BrainStore
+    @EnvironmentObject var github: GitHubStore
+    @EnvironmentObject var chat: ChatStore
+    let proposal: Proposal
+    @State private var expanded = false
+
+    private var icon: String {
+        switch proposal.kind {
+        case .mission: return proposal.mode == "work" ? "hammer.fill" : "binoculars.fill"
+        case .merge: return "arrow.triangle.merge"
+        case .rerun: return "arrow.clockwise.circle.fill"
+        case .refresh: return "arrow.triangle.2.circlepath"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: icon).foregroundStyle(Theme.accent)
+                    .frame(width: 32, height: 32).background(Theme.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("PROPOSED ORDER").font(Theme.monoSmall).foregroundStyle(.secondary)
+                    Text(proposal.title).font(.subheadline.weight(.semibold))
+                }
+                Spacer()
+                stateBadge
+            }
+            if !proposal.reason.isEmpty { Text(proposal.reason).font(.callout).foregroundStyle(.secondary) }
+            if proposal.kind == .mission {
+                Text(proposal.prompt).font(.callout).lineLimit(expanded ? nil : 5)
+                    .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .onTapGesture { expanded.toggle() }
+                Text("Runs on \(proposal.machine)\(proposal.mode == "work" ? " · on its own branch; push waits for you" : " · read only")")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if proposal.state == .pending {
+                HStack {
+                    Button { Task { await chat.approve(proposal.id, brain: brain, github: github) } } label: {
+                        Label("Approve", systemImage: "checkmark").frame(maxWidth: .infinity)
+                    }.buttonStyle(.borderedProminent)
+                    Button("Cancel") { chat.cancel(proposal.id) }.buttonStyle(.bordered)
+                }
+            } else if !proposal.message.isEmpty {
+                Text(proposal.message).font(.footnote).foregroundStyle(proposal.state == .failed ? Theme.action : .secondary)
+            }
+        }
+        .card(tint: proposal.state == .pending ? Theme.accent : nil)
+    }
+
+    @ViewBuilder
+    private var stateBadge: some View {
+        switch proposal.state {
+        case .pending: Pill(text: "Awaiting you", color: Theme.accent)
+        case .running: ProgressView().controlSize(.small)
+        case .done: Pill(text: "Sent", color: Theme.ok)
+        case .cancelled: Pill(text: "Cancelled")
+        case .failed: Pill(text: "Failed", color: Theme.action)
+        }
     }
 }
 

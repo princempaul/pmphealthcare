@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ProjectsView: View {
     @EnvironmentObject var brain: BrainStore
+    @EnvironmentObject var github: GitHubStore
     @State private var query = ""
 
     private var grouped: [(String, [(machine: String, project: MachineSnapshot.Project)])] {
@@ -25,6 +26,11 @@ struct ProjectsView: View {
                                         Text(row.machine).font(.caption).foregroundStyle(.secondary)
                                     }
                                     Spacer()
+                                    if let slug = GitHubStore.slug(fromRemote: row.project.remote),
+                                       let r = github.repos.first(where: { $0.slug == slug }) {
+                                        if !r.failing.isEmpty { Pill(text: "Build failing", color: Theme.action) }
+                                        else if !r.pulls.isEmpty { Pill(text: "\(r.pulls.count) PR", color: Theme.accent) }
+                                    }
                                     if row.project.isLoose {
                                         Text("Loose work").font(.caption2.weight(.semibold)).padding(.horizontal, 8).padding(.vertical, 3)
                                             .background(Theme.watch.opacity(0.18), in: Capsule()).foregroundStyle(Theme.watch)
@@ -49,11 +55,65 @@ struct ProjectsView: View {
 
 struct ProjectDetail: View {
     @EnvironmentObject var brain: BrainStore
+    @EnvironmentObject var github: GitHubStore
+    @Environment(\.openURL) private var openURL
     let machine: String
     let project: MachineSnapshot.Project
+    @State private var composing = false
+
+    private var repo: GitHubStore.Repo? {
+        guard let slug = GitHubStore.slug(fromRemote: project.remote) else { return nil }
+        return github.repos.first { $0.slug == slug }
+    }
 
     var body: some View {
         List {
+            Section {
+                Button { composing = true } label: { Label("Send a mission here", systemImage: "scope") }
+            }
+            if let repo {
+                Section("GitHub · \(repo.slug)") {
+                    if repo.pulls.isEmpty { Text("No open pull requests").foregroundStyle(.secondary) }
+                    ForEach(repo.pulls) { p in
+                        Button { if let u = URL(string: p.url) { openURL(u) } } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(p.title).foregroundStyle(.primary)
+                                    Text("#\(p.number) · \(p.author)\(p.draft ? " · draft" : "")").font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Pill(text: p.checks, color: p.checks == "passing" ? Theme.ok : p.checks == "failing" ? Theme.action : .secondary)
+                            }
+                        }
+                    }
+                    ForEach(repo.latestRuns.prefix(4)) { r in
+                        Button { if let u = URL(string: r.url) { openURL(u) } } label: {
+                            HStack {
+                                StatusLight(color: r.status != "completed" ? Theme.live : r.conclusion == "success" ? Theme.ok : r.conclusion == "failure" ? Theme.action : .secondary,
+                                            pulsing: r.status != "completed", size: 6)
+                                Text(r.name).foregroundStyle(.primary)
+                                Spacer()
+                                Text(r.status == "completed" ? (r.conclusion ?? "") : r.status).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+            let live = brain.sessions.filter { $0.session.project == project.path }
+            if !live.isEmpty {
+                Section("Claude sessions (24h)") {
+                    ForEach(live, id: \.session.id) { s in
+                        HStack {
+                            StatusLight(color: s.session.state == "active" ? Theme.live : s.session.state == "waiting" ? Theme.watch : .secondary,
+                                        pulsing: s.session.state == "active", size: 6)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(s.session.title).lineLimit(2)
+                                Text("\(s.session.state) · \(s.machine) · \(ago(s.session.lastDate)) ago").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
             Section {
                 row("Mac", machine)
                 row("Location", project.path)
@@ -69,6 +129,7 @@ struct ProjectDetail: View {
             if !notes.isEmpty { Section("Decisions") { ForEach(notes) { Text($0.text) } } }
         }
         .navigationTitle(project.name)
+        .sheet(isPresented: $composing) { NewMissionView(machine: machine, projectPath: project.path) }
     }
 
     private func row(_ k: String, _ v: String) -> some View {

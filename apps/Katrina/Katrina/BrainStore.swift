@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor
 final class BrainStore: ObservableObject {
     @Published private(set) var machines: [MachineSnapshot] = []
+    @Published private(set) var fleet: [FleetSnapshot] = []
     @Published private(set) var nightlyReport: String = ""
     @Published private(set) var lastLoaded: Date?
     @Published private(set) var error: String?
@@ -97,6 +98,15 @@ final class BrainStore: ObservableObject {
             loaded.append(snap)
         }
         machines = loaded.sorted { $0.machine < $1.machine }
+        var crews: [FleetSnapshot] = []
+        let fleetDir = folder.appendingPathComponent("fleet")
+        for f in (try? fm.contentsOfDirectory(at: fleetDir, includingPropertiesForKeys: nil)) ?? [] {
+            if f.lastPathComponent.hasSuffix(".icloud") { try? fm.startDownloadingUbiquitousItem(at: f); continue }
+            guard f.pathExtension == "json" else { continue }
+            try? fm.startDownloadingUbiquitousItem(at: f)          // nudge iCloud for the newest copy
+            if let data = readCoordinated(f), let snap = try? JSONDecoder().decode(FleetSnapshot.self, from: data) { crews.append(snap) }
+        }
+        fleet = crews.sorted { ($0.laptop ?? false ? 1 : 0, $0.machine) < ($1.laptop ?? false ? 1 : 0, $1.machine) }
         let report = folder.appendingPathComponent("latest-nightly.md")
         if let data = readCoordinated(report) { nightlyReport = String(decoding: data, as: UTF8.self) }
         error = loaded.isEmpty ? "No Mac snapshots found yet in \(folder.lastPathComponent)/machines. Run the installer on a Mac and wait for its hourly update." : nil
@@ -148,6 +158,53 @@ final class BrainStore: ObservableObject {
         }
     }
 
+    // MARK: orders for the Macs' ground crew
+
+    enum OrderError: LocalizedError {
+        case notPaired, noFolder, patientDetail, noMac, write(String)
+        var errorDescription: String? {
+            switch self {
+            case .notPaired: return "Pair with your Macs first: Settings > Pair with your Macs."
+            case .noFolder: return "Choose the PMPBrain folder in Settings first."
+            case .patientDetail: return "That reads like patient detail, so it wasn't sent. Say \"a patient inquiry\" instead."
+            case .noMac: return "No Mac's crew has checked in yet. Run ./install.sh on the iMac."
+            case .write(let m): return "Couldn't send the order: \(m)"
+            }
+        }
+    }
+
+    /// The Mac that takes orders by default: the always-on one that checked in most recently.
+    var commandMac: FleetSnapshot? {
+        fleet.filter { !($0.laptop ?? false) }.max { ($0.generatedDate ?? .distantPast) < ($1.generatedDate ?? .distantPast) }
+            ?? fleet.max { ($0.generatedDate ?? .distantPast) < ($1.generatedDate ?? .distantPast) }
+    }
+
+    var missions: [(machine: String, mission: FleetSnapshot.Mission)] {
+        fleet.flatMap { f in f.missions.map { (f.machine, $0) } }
+            .sorted { ($0.mission.created ?? "") > ($1.mission.created ?? "") }
+    }
+
+    var sessions: [(machine: String, session: FleetSnapshot.Session)] {
+        fleet.flatMap { f in f.sessions.map { (f.machine, $0) } }
+            .sorted { ($0.session.last ?? "") > ($1.session.last ?? "") }
+    }
+
+    func send(_ order: CrewOrder) throws {
+        guard let code = Keychain.pairingCode else { throw OrderError.notPaired }
+        if Privacy.looksLikePatientDetail(order.prompt) { throw OrderError.patientDetail }
+        guard let folder = resolveFolder() else { throw OrderError.noFolder }
+        let ok = folder.startAccessingSecurityScopedResource()
+        defer { if ok { folder.stopAccessingSecurityScopedResource() } }
+        let dir = folder.appendingPathComponent("orders")
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let data = try JSONEncoder().encode(order.signed(with: code))
+            try data.write(to: dir.appendingPathComponent("\(order.id).json"), options: .atomic)
+        } catch {
+            throw OrderError.write(error.localizedDescription)
+        }
+    }
+
     /// Plain-text digest Katrina reads before answering, so most questions need no further lookups.
     func digest(maxChars: Int = 9000) -> String {
         var lines: [String] = []
@@ -159,6 +216,11 @@ final class BrainStore: ObservableObject {
         lines.append("PROJECTS")
         lines += projects.map { p in "- \(p.project.name) [\(p.project.category ?? "")] on \(p.machine)\(p.project.isLoose ? " (loose work)" : "")" }
         if !map.isEmpty { lines.append("HOW THINGS CONNECT"); lines += map.map { $0 } }
+        for f in fleet {
+            lines.append("CREW \(f.machine): \(f.isOnline ? "online" : "offline"), \(f.sessions.filter { $0.state != "idle" }.count) live Claude session(s)")
+            lines += f.sessions.filter { $0.state != "idle" }.prefix(8).map { "- session [\($0.state)] \($0.projectName): \($0.title)" }
+            lines += f.missions.prefix(10).map { "- mission \($0.id.prefix(8)) [\($0.state)] \($0.projectName ?? ""): \(($0.prompt ?? "").prefix(80))" }
+        }
         if !notes.isEmpty { lines.append("DECISIONS"); lines += notes.prefix(15).map { "- \($0.created.prefix(10)) [\($0.topic)] \($0.text)" } }
         return String(lines.joined(separator: "\n").prefix(maxChars))
     }
