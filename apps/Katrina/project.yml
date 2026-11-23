@@ -29,6 +29,10 @@ targets:
         UISupportedInterfaceOrientations~iphone: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         LSApplicationCategoryType: public.app-category.productivity
         UIBackgroundModes: [fetch]
+        NSMicrophoneUsageDescription: Katrina listens when you tap the microphone or use Talk mode, so you can speak instead of type.
+        NSSpeechRecognitionUsageDescription: Your words are turned into text on this device where possible, so Katrina can act on what you say.
+        INAlternativeAppNames:
+          - INAlternativeAppName: Katrina
         BGTaskSchedulerPermittedIdentifiers: [ca.pmphealthcare.katrina.refresh]
         ITSAppUsesNonExemptEncryption: false
     entitlements:
@@ -36,6 +40,7 @@ targets:
       properties:
         com.apple.security.app-sandbox: true
         com.apple.security.network.client: true
+        com.apple.security.device.audio-input: true
         com.apple.security.files.user-selected.read-write: true
         com.apple.security.files.bookmarks.app-scope: true
     settings:

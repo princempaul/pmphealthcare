@@ -5,6 +5,9 @@ import SwiftUI
 /// Reads what the two Macs share in iCloud Drive > PMPBrain. All local: no AI call, no tokens.
 @MainActor
 final class BrainStore: ObservableObject {
+    /// One instance for the app, Siri and Shortcuts.
+    static let shared = BrainStore()
+
     @Published private(set) var machines: [MachineSnapshot] = []
     @Published private(set) var fleet: [FleetSnapshot] = []
     @Published private(set) var nightlyReport: String = ""

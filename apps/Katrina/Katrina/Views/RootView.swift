@@ -3,6 +3,7 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject var brain: BrainStore
     @AppStorage("onboarded") private var onboarded = false
+    @AppStorage("talk.open") private var talkOpen = false
     @State private var tab = 0
 
     var body: some View {
@@ -17,6 +18,11 @@ struct RootView: View {
                 SettingsView().tabItem { Label("Settings", systemImage: "gearshape") }.tag(4)
             }
             .onAppear { if UserDefaults.standard.object(forKey: "notify") as? Bool ?? true { Notifier.requestPermission() } }
+            #if os(iOS)
+            .fullScreenCover(isPresented: $talkOpen) { TalkView().environmentObject(ChatStore.shared) }
+            #else
+            .sheet(isPresented: $talkOpen) { TalkView().environmentObject(ChatStore.shared).frame(minWidth: 520, minHeight: 640) }
+            #endif
         }
     }
 }

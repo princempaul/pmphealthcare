@@ -40,6 +40,9 @@ struct ChatLine: Identifiable, Hashable {
 /// Dispatch: Paul talks to Katrina; she looks things up across the fleet and proposes orders as cards.
 @MainActor
 final class ChatStore: ObservableObject {
+    /// One instance for the app, Siri and Shortcuts.
+    static let shared = ChatStore()
+
     @Published var lines: [ChatLine] = []
     @Published var proposals: [UUID: Proposal] = [:]
     @Published var busy = false
@@ -106,7 +109,28 @@ final class ChatStore: ObservableObject {
 
     func reset() { lines = []; history = []; status = ""; proposals = [:] }
 
-    func ask(_ question: String, brain: BrainStore, github: GitHubStore, sites: SiteMonitor) async {
+    private let voiceStyle = """
+
+    SPOKEN REPLY: Paul is listening, not reading. Answer in one to three short spoken sentences, most important \
+    first. No lists, headings, symbols, links, IDs or file paths. Say numbers the way a person would. If there's \
+    more, offer it in one short question at the end.
+    """
+
+    /// For Siri, Shortcuts and Talk mode: ask, then return what Katrina said as one plain string.
+    func reply(to question: String, voice: Bool = true) async -> String {
+        let before = lines.count
+        let proposalsBefore = proposals.count
+        await ask(question, brain: BrainStore.shared, github: GitHubStore.shared, sites: SiteMonitor.shared, voice: voice)
+        let new = lines.suffix(from: min(before, lines.count))
+        var text = new.filter { $0.role == .katrina || $0.role == .note }.map(\.text).joined(separator: " ")
+        let lined = proposals.count - proposalsBefore
+        if lined > 0 {
+            text += lined == 1 ? " I've lined up one order. Open Katrina to approve it." : " I've lined up \(lined) orders. Open Katrina to approve them."
+        }
+        return text.isEmpty ? "Sorry, I didn't get an answer back. Try again in a moment." : text
+    }
+
+    func ask(_ question: String, brain: BrainStore, github: GitHubStore, sites: SiteMonitor, voice: Bool = false) async {
         let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty, !busy else { return }
         lines.append(ChatLine(role: .paul, text: q))
@@ -121,7 +145,7 @@ final class ChatStore: ObservableObject {
         defer { busy = false; status = "" }
         let client = ClaudeClient(apiKey: key, model: ClaudeClient.Model(rawValue: modelRaw) ?? .opus)
         let asOf = brain.lastLoaded.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "not loaded"
-        let system = rules + "\n\nDIGEST (as of \(asOf)):\n" + brain.digest()
+        let system = rules + (voice ? voiceStyle : "") + "\n\nDIGEST (as of \(asOf)):\n" + brain.digest()
         let start = history.count
         history.append(["role": "user", "content": q])
         do {

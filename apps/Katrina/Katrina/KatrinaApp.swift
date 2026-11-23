@@ -5,10 +5,10 @@ import BackgroundTasks
 
 @main
 struct KatrinaApp: App {
-    @StateObject private var brain = BrainStore()
-    @StateObject private var chat = ChatStore()
-    @StateObject private var github = GitHubStore()
-    @StateObject private var sites = SiteMonitor()
+    @StateObject private var brain = BrainStore.shared
+    @StateObject private var chat = ChatStore.shared
+    @StateObject private var github = GitHubStore.shared
+    @StateObject private var sites = SiteMonitor.shared
     @AppStorage("appearance") private var appearance = 2   // 0 system, 1 light, 2 dark (the tower default)
     @Environment(\.scenePhase) private var phase
 

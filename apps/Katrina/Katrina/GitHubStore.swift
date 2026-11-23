@@ -5,6 +5,9 @@ import Foundation
 /// Uses a fine-grained token from the Keychain. Writes happen only from a button Paul taps.
 @MainActor
 final class GitHubStore: ObservableObject {
+    /// One instance for the app, Siri and Shortcuts.
+    static let shared = GitHubStore()
+
     struct Repo: Identifiable, Hashable {
         let slug: String                  // owner/name
         var defaultBranch: String = "main"
