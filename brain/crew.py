@@ -729,6 +729,10 @@ def self_update():
 
 # ---------------------------------------------------------------- what this Mac is doing
 
+ASKS = re.compile(r"\b(should I|shall I|want me to|would you like|do you want|which (one|option)|let me know|"
+                  r"your call|confirm|approve|go ahead\?)", re.I)
+
+
 def last_event(fp):
     """Role and whether the last assistant turn ended waiting for Paul, from the tail of a session file."""
     try:
@@ -751,7 +755,10 @@ def last_event(fp):
         if t == "assistant":
             blocks = content if isinstance(content, list) else []
             uses_tool = any(isinstance(b, dict) and b.get("type") == "tool_use" for b in blocks)
-            return "assistant", not uses_tool
+            text = " ".join(b.get("text", "") for b in blocks if isinstance(b, dict) and b.get("type") == "text").strip()
+            # waiting = Claude stopped and asked Paul something, not just finished a reply
+            asks = text.endswith("?") or bool(ASKS.search(text[-300:]))
+            return "assistant", (not uses_tool) and asks
         return "user", False
     return None, False
 
@@ -770,7 +777,7 @@ def sessions(cfg, mission_sids):
             files.append((mt, fp))
     for mt, fp in sorted(files, reverse=True)[:40]:
         c = cache.get(fp)
-        if not c or c.get("mtime") != mt:
+        if not c or c.get("mtime") != mt or c.get("v") != 2:
             s = brain.parse_session(fp)
             blob = " ".join([s["title"], s["first_user"], s["sample"], s["project_path"]])
             cat = brain.categorize(blob, cfg)
@@ -779,12 +786,12 @@ def sessions(cfg, mission_sids):
             role, waiting = last_event(fp)
             c = dict(mtime=mt, id=s["session_id"], project=(s["project_path"] or "").replace(HOME, "~"),
                      title=title or "(untitled)", category="Clinical documentation" if clinical else cat,
-                     started=s["started"][:19], messages=s["messages"], last_role=role, waiting=waiting)
+                     started=s["started"][:19], messages=s["messages"], last_role=role, waiting=waiting, v=2)
         fresh[fp] = c
         if not c.get("messages"):
             continue
         age = time.time() - mt
-        state = "active" if age < 90 else ("waiting" if c.get("waiting") and age < 12 * 3600 else "idle")
+        state = "active" if age < 90 else ("waiting" if c.get("waiting") and age < 3 * 3600 else "idle")
         out.append(dict(id=c["id"], project=c["project"], title=c["title"], category=c["category"],
                         started=c["started"], last=brain.dt.datetime.fromtimestamp(mt).replace(microsecond=0).isoformat(),
                         messages=c["messages"], state=state, mission=mission_sids.get(c["id"], "")))
