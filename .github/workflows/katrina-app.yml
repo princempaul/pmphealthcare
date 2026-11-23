@@ -6,9 +6,16 @@ on:
   pull_request:
     paths: ["apps/Katrina/**", ".github/workflows/katrina-app.yml"]
   workflow_dispatch:
+    inputs:
+      step:
+        description: What to run
+        type: choice
+        default: build and upload
+        options: ["build and upload", "testers only"]
 
 jobs:
   build:
+    if: github.event_name != 'workflow_dispatch' || inputs.step != 'testers only'
     runs-on: macos-latest
     timeout-minutes: 40
     strategy:
@@ -45,7 +52,7 @@ jobs:
 
   testflight:
     # Runs by hand (Actions > Katrina app build > Run workflow) once the App Store Connect secrets exist.
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.step != 'testers only'
     needs: build
     runs-on: macos-latest
     timeout-minutes: 45
@@ -119,3 +126,18 @@ jobs:
       - name: Show the errors
         if: failure()
         run: grep -hE "error:" -A3 apps/Katrina/archive.log apps/Katrina/export.log 2>/dev/null | head -150 || true
+
+  testers:
+    # Internal TestFlight group "Me" with every build, and the account's Admin users in it.
+    needs: testflight
+    if: always() && github.event_name == 'workflow_dispatch' && (needs.testflight.result == 'success' || inputs.step == 'testers only')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID || vars.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID || vars.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install --quiet "pyjwt[crypto]"
+      - run: python3 apps/Katrina/ci/testflight_testers.py
