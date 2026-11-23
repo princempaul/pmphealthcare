@@ -115,7 +115,7 @@ struct DispatchView: View {
                 .padding(.horizontal, 14).padding(.vertical, 10)
                 .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .onSubmit { send(draft) }
-            if draft.trimmingCharacters(in: .whitespaces).isEmpty && !chat.busy {
+            if dictation.state == .listening || (draft.trimmingCharacters(in: .whitespaces).isEmpty && !chat.busy) {
                 Button { dictate() } label: {
                     Image(systemName: dictation.state == .listening ? "waveform" : "mic.fill").font(.headline)
                         .frame(width: 36, height: 36)
@@ -134,6 +134,14 @@ struct DispatchView: View {
         }
         .padding(12)
         .background(.bar)
+        // voice to type: words appear in the box as you speak
+        .onChange(of: dictation.transcript) { _, t in if dictation.state == .listening { draft = t } }
+        .onChange(of: dictation.state) { _, st in
+            if case .denied(let why) = st {
+                chat.lines.append(ChatLine(role: .note, text: why))
+                dictation.reset()
+            }
+        }
     }
 
     private func send(_ text: String, spoken: Bool = false) {
@@ -152,11 +160,10 @@ struct DispatchView: View {
     /// Tap the mic, speak, pause: it sends by itself and Katrina answers out loud.
     private func dictate() {
         if dictation.state == .listening { dictation.finish(); return }
+        VoiceOutput.shared.stop()
         dictation.onFinished = { text in send(text, spoken: true) }
-        Task {
-            await dictation.start()
-            if case .denied(let why) = dictation.state { chat.lines.append(ChatLine(role: .note, text: why)) }
-        }
+        dictation.reset()
+        Task { await dictation.start() }
     }
 }
 

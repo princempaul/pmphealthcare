@@ -177,7 +177,7 @@ struct MissionDetailView: View {
             if m.isLive {
                 Button(role: .destructive) { order(.stop, m) } label: { Label("Stop", systemImage: "stop.fill").frame(maxWidth: .infinity) }
                     .buttonStyle(.bordered).disabled(sent.contains("stop"))
-            } else if ["done", "needs_approval", "failed", "stopped", "pushed"].contains(m.state) {
+            } else if ["done", "needs_approval", "failed", "stopped"].contains(m.state) {
                 VStack(alignment: .leading, spacing: 8) {
                     SectionLabel(text: "Follow up")
                     TextField("Tell Katrina what to do next", text: $followUp, axis: .vertical).lineLimit(2...6)

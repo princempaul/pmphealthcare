@@ -13,12 +13,14 @@ final class VoiceInput: ObservableObject {
 
     var onFinished: ((String) -> Void)?
 
-    private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-CA")) ?? SFSpeechRecognizer()
+    private let recognizer = SFSpeechRecognizer(locale: Locale.current) ?? SFSpeechRecognizer(locale: Locale(identifier: "en-CA"))
+        ?? SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     private let engine = AVAudioEngine()
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private var silence: Task<Void, Never>?
-    private let pause: Duration = .milliseconds(1500)
+    private let pause: Duration = .milliseconds(1600)
+    private var onDeviceOK = true
 
     static func requestPermissions() async -> String? {
         let speech = await withCheckedContinuation { c in SFSpeechRecognizer.requestAuthorization { c.resume(returning: $0) } }
@@ -34,20 +36,36 @@ final class VoiceInput: ObservableObject {
     func start() async {
         guard state != .listening else { return }
         if let problem = await Self.requestPermissions() { state = .denied(problem); return }
-        guard let recognizer, recognizer.isAvailable else { state = .denied("Speech recognition isn't available right now."); return }
+        guard let recognizer else { state = .denied("Speech recognition isn't available for your language on this device."); return }
+        guard recognizer.isAvailable else {
+            state = .denied("Speech recognition is unavailable right now. Check that Dictation is on: Settings > General > Keyboard > Enable Dictation.")
+            return
+        }
         transcript = ""
         #if os(iOS)
         let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .duckOthers])
-        try? session.setActive(true, options: .notifyOthersOnDeactivation)
+        do {
+            try session.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker, .allowBluetooth, .duckOthers])
+            try session.setActive(true, options: .notifyOthersOnDeactivation)
+        } catch {
+            state = .denied("The microphone is busy (a call or another app?). Try again.")
+            return
+        }
         #endif
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
-        if recognizer.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }   // audio stays on the phone
+        req.taskHint = .dictation
         req.addsPunctuation = true
+        // On-device when this phone has the offline model; otherwise Apple's server. Forcing on-device when the
+        // model isn't downloaded is what made the mic silently do nothing before.
+        req.requiresOnDeviceRecognition = onDeviceOK && recognizer.supportsOnDeviceRecognition
         request = req
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            state = .denied("No microphone input is available.")
+            return
+        }
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             req.append(buffer)
@@ -57,25 +75,39 @@ final class VoiceInput: ObservableObject {
         engine.prepare()
         do { try engine.start() } catch { state = .denied("Couldn't start the microphone: \(error.localizedDescription)"); return }
         state = .listening
+        armSilence(first: true)
         task = recognizer.recognitionTask(with: req) { [weak self] result, error in
             let text = result?.bestTranscription.formattedString
             let final = result?.isFinal ?? false
+            let failure = error.map { ($0 as NSError).code }
             Task { @MainActor in
-                guard let self else { return }
-                if let text { self.transcript = text; self.armSilence() }
-                if final || (error != nil && !self.transcript.isEmpty) { self.finish() }
-                else if error != nil { self.stop() }
+                guard let self, self.state == .listening else { return }
+                if let text, !text.isEmpty { self.transcript = text; self.armSilence() }
+                if final { self.finish(); return }
+                guard let failure else { return }
+                if !self.transcript.isEmpty { self.finish(); return }
+                self.stop()
+                if self.onDeviceOK && req.requiresOnDeviceRecognition {
+                    self.onDeviceOK = false                     // offline model missing: retry once on the server
+                    await self.start()
+                } else if failure == 1110 || failure == 203 {   // no speech heard
+                    self.state = .denied("I didn't hear anything. Tap the mic and speak.")
+                } else {
+                    self.state = .denied("Dictation didn't work (code \(failure)). Check Settings > General > Keyboard > Enable Dictation, then try again.")
+                }
             }
         }
     }
 
-    /// Finish after a pause in speech.
-    private func armSilence() {
+    /// Finish after a pause in speech; give up after 8 seconds if nothing was said at all.
+    private func armSilence(first: Bool = false) {
         silence?.cancel()
-        silence = Task { [weak self, pause] in
-            try? await Task.sleep(for: pause)
-            guard !Task.isCancelled else { return }
-            self?.finish()
+        let wait: Duration = first ? .seconds(8) : pause
+        silence = Task { [weak self] in
+            try? await Task.sleep(for: wait)
+            guard !Task.isCancelled, let self else { return }
+            if self.transcript.isEmpty { self.stop(); self.state = .denied("I didn't hear anything. Tap the mic and speak.") }
+            else { self.finish() }
         }
     }
 
@@ -96,7 +128,13 @@ final class VoiceInput: ObservableObject {
         task = nil
         level = 0
         if state == .listening { state = .idle }
+        #if os(iOS)
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        #endif
     }
+
+    /// Clear a previous error so the mic can be tried again.
+    func reset() { if case .denied = state { state = .idle } }
 
     private nonisolated static func rms(_ buffer: AVAudioPCMBuffer) -> Float {
         guard let data = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return 0 }
@@ -157,6 +195,13 @@ final class VoiceOutput: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         done = nil
         if synth.isSpeaking { synth.stopSpeaking(at: .immediate) }
         speaking = false
+        Self.releaseAudio()
+    }
+
+    private static func releaseAudio() {
+        #if os(iOS)
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        #endif
     }
 
     nonisolated func speechSynthesizer(_ s: AVSpeechSynthesizer, didFinish u: AVSpeechUtterance) {
@@ -164,6 +209,7 @@ final class VoiceOutput: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             self.speaking = false
             let next = self.done
             self.done = nil
+            Self.releaseAudio()          // let music and podcasts come back up; listening reactivates it
             next?()
         }
     }
