@@ -115,7 +115,26 @@ def main():
     builds = must(*call("GET", "/builds?filter[app]=%s&sort=-uploadedDate&limit=3" % app_id), "Listing builds")["data"]
     for b in builds:
         at = b["attributes"]
-        print("Build %s: processing=%s, expired=%s" % (at.get("version"), at.get("processingState"), at.get("expired")))
+        s, d = call("GET", "/builds/%s/buildBetaDetail" % b["id"])
+        internal = (d.get("data") or {}).get("attributes", {}).get("internalBuildState") if s < 300 else "unknown"
+        print("Build %s: processing=%s, expired=%s, internal testing=%s"
+              % (at.get("version"), at.get("processingState"), at.get("expired"), internal))
+        if internal == "MISSING_EXPORT_COMPLIANCE":
+            s, d = call("PATCH", "/builds/" + b["id"], {"data": {"type": "builds", "id": b["id"],
+                                                                 "attributes": {"usesNonExemptEncryption": False}}})
+            print("  Answered export compliance (no non-exempt encryption)." if s < 300
+                  else "::warning::Couldn't answer export compliance: %s" % d.get("error"))
+
+    # Send (or re-send) the TestFlight invite email to anyone in the group who hasn't accepted yet.
+    testers = must(*call("GET", "/betaGroups/%s/betaTesters?limit=200" % gid), "Listing group testers")["data"]
+    for t in testers:
+        state = t["attributes"].get("state")
+        print("Tester status: %s" % state)
+        if state in ("NOT_INVITED", "INVITED", None):
+            s, d = call("POST", "/betaTesterInvitations", {"data": {"type": "betaTesterInvitations", "relationships": {
+                "app": {"data": {"type": "apps", "id": app_id}},
+                "betaTester": {"data": {"type": "betaTesters", "id": t["id"]}}}}})
+            print("  Invite email sent." if s < 300 else "::warning::Couldn't send the invite (%s): %s" % (s, d.get("error")))
     print("Done. Open TestFlight on the iPhone (same Apple ID) and Katrina PA should be there once processing is VALID.")
     return 0
 
