@@ -3,6 +3,9 @@ import Foundation
 /// Are the public websites up? A plain GET from the phone, timed. No tokens, no AI.
 @MainActor
 final class SiteMonitor: ObservableObject {
+    /// One instance for the app, Siri and Shortcuts.
+    static let shared = SiteMonitor()
+
     struct Site: Identifiable, Hashable {
         let url: String
         var status: Int = 0          // HTTP status; 0 = not checked or no answer

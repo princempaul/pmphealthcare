@@ -8,6 +8,7 @@ struct SettingsView: View {
     @AppStorage("appearance") private var appearance = 2
     @AppStorage("sites") private var siteList = SiteMonitor.defaultList
     @AppStorage("notify") private var notify = true
+    @AppStorage("speak.replies") private var speakReplies = false
     @State private var key = ""
     @State private var token = ""
     @State private var code = ""
@@ -97,6 +98,13 @@ struct SettingsView: View {
                         #endif
                     Button("Check now") { Task { await sites.refresh() } }
                 } header: { Text("Websites to watch") } footer: { Text("Separate with commas.") }
+
+                Section {
+                    Toggle("Read Dispatch replies aloud", isOn: $speakReplies)
+                    LabeledContent("Voice", value: VoiceOutput.bestVoice?.name ?? "System")
+                } header: { Text("Voice") } footer: {
+                    Text("Say \"Hey Siri, ask Katrina PA\" or \"Hey Siri, what needs me in Katrina PA\". For a better voice: iPhone Settings > Accessibility > Spoken Content > Voices > English, download an Enhanced or Premium voice; Katrina uses the best one installed.")
+                }
 
                 Section("Alerts") {
                     Toggle("Notify me when something needs me", isOn: $notify)

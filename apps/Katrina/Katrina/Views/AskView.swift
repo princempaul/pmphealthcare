@@ -8,6 +8,9 @@ struct DispatchView: View {
     @EnvironmentObject var chat: ChatStore
     @State private var draft = ""
     @State private var showJane = false
+    @AppStorage("talk.open") private var talkOpen = false
+    @AppStorage("speak.replies") private var speakReplies = false
+    @StateObject private var dictation = VoiceInput()
     @FocusState private var focused: Bool
 
     private let suggestions = [
@@ -47,6 +50,7 @@ struct DispatchView: View {
                 ToolbarItem(placement: .navigation) {
                     Button { showJane = true } label: { Label("Jane", systemImage: "stethoscope") }
                 }
+                ToolbarItem { Button { talkOpen = true } label: { Label("Talk", systemImage: "waveform") } }
                 ToolbarItem { Button("New") { chat.reset() }.disabled(chat.lines.isEmpty || chat.busy) }
             }
             .sheet(isPresented: $showJane) { JaneView() }
@@ -105,26 +109,54 @@ struct DispatchView: View {
 
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 10) {
-            TextField("Ask or give an order", text: $draft, axis: .vertical)
+            TextField(dictation.state == .listening ? (dictation.transcript.isEmpty ? "Listening…" : dictation.transcript) : "Ask or give an order",
+                      text: $draft, axis: .vertical)
                 .lineLimit(1...6).textFieldStyle(.plain).focused($focused)
                 .padding(.horizontal, 14).padding(.vertical, 10)
                 .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .onSubmit { send(draft) }
-            Button { send(draft) } label: {
-                Image(systemName: "arrow.up").font(.headline).frame(width: 36, height: 36)
-                    .background(Theme.accent, in: Circle()).foregroundStyle(.white)
+            if draft.trimmingCharacters(in: .whitespaces).isEmpty && !chat.busy {
+                Button { dictate() } label: {
+                    Image(systemName: dictation.state == .listening ? "waveform" : "mic.fill").font(.headline)
+                        .frame(width: 36, height: 36)
+                        .background(dictation.state == .listening ? Theme.live : Theme.accent, in: Circle()).foregroundStyle(.white)
+                        .symbolEffect(.variableColor.iterative, isActive: dictation.state == .listening)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Button { send(draft) } label: {
+                    Image(systemName: "arrow.up").font(.headline).frame(width: 36, height: 36)
+                        .background(Theme.accent, in: Circle()).foregroundStyle(.white)
+                }
+                .buttonStyle(.plain).disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty || chat.busy)
+                .keyboardShortcut(.return, modifiers: .command)
             }
-            .buttonStyle(.plain).disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty || chat.busy)
-            .keyboardShortcut(.return, modifiers: .command)
         }
         .padding(12)
         .background(.bar)
     }
 
-    private func send(_ text: String) {
+    private func send(_ text: String, spoken: Bool = false) {
         let q = text
         draft = ""
-        Task { await chat.ask(q, brain: brain, github: github, sites: sites) }
+        Task {
+            let before = chat.lines.count
+            await chat.ask(q, brain: brain, github: github, sites: sites, voice: spoken)
+            if spoken || speakReplies {
+                let said = chat.lines.suffix(from: min(before, chat.lines.count)).filter { $0.role == .katrina }.map(\.text).joined(separator: " ")
+                if !said.isEmpty { VoiceOutput.shared.speak(said) }
+            }
+        }
+    }
+
+    /// Tap the mic, speak, pause: it sends by itself and Katrina answers out loud.
+    private func dictate() {
+        if dictation.state == .listening { dictation.finish(); return }
+        dictation.onFinished = { text in send(text, spoken: true) }
+        Task {
+            await dictation.start()
+            if case .denied(let why) = dictation.state { chat.lines.append(ChatLine(role: .note, text: why)) }
+        }
     }
 }
 
