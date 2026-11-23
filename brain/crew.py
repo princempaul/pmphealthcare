@@ -370,6 +370,9 @@ def handle(order, projects):
     if kind == "mission":
         new_mission(order, projects)
         return
+    if kind == "cleanup":
+        clear_caches()
+        return
     if kind in ("gh_merge", "gh_rerun", "gh_openpr"):
         gh_order(order)
         return
@@ -727,6 +730,97 @@ def self_update():
     return st
 
 
+# ---------------------------------------------------------------- disk space
+
+DISK_STATE = os.path.join(BASE, "crew-disk.json")
+DISK_EVERY = 6 * 3600
+# Where space usually goes. Measured only; never deleted (except the safe caches below).
+DISK_PLACES = [("Downloads", "~/Downloads"), ("Desktop", "~/Desktop"), ("Documents", "~/Documents"),
+               ("Movies", "~/Movies"), ("Pictures (Photos library)", "~/Pictures"), ("Music", "~/Music"),
+               ("iPhone and iPad backups", "~/Library/Application Support/MobileSync/Backup"),
+               ("Developer (Xcode, simulators)", "~/Library/Developer"), ("App caches", "~/Library/Caches"),
+               ("App containers", "~/Library/Containers"), ("Mail", "~/Library/Mail"),
+               ("Messages attachments", "~/Library/Messages"), ("Trash", "~/.Trash"),
+               ("Katrina mission worktrees", "~/PMPBrain/worktrees")]
+# Throwaway caches that rebuild themselves. This is the whole list "Clear caches" may touch.
+SAFE_CACHES = [("Xcode build files", "~/Library/Developer/Xcode/DerivedData"),
+               ("Xcode archives older builds cache", "~/Library/Caches/com.apple.dt.Xcode"),
+               ("Simulator caches", "~/Library/Developer/CoreSimulator/Caches"),
+               ("npm download cache", "~/.npm/_cacache"),
+               ("Homebrew downloads", "~/Library/Caches/Homebrew"),
+               ("pip download cache", "~/Library/Caches/pip"),
+               ("Yarn cache", "~/Library/Caches/Yarn"),
+               ("CocoaPods cache", "~/Library/Caches/CocoaPods")]
+
+
+def du_gb(path, timeout=180):
+    p = os.path.expanduser(path)
+    if not os.path.exists(p):
+        return 0.0
+    try:
+        out = subprocess.run(["du", "-sk", p], capture_output=True, text=True, timeout=timeout).stdout.split()
+        return round(int(out[0]) / 1e6, 2) if out else 0.0
+    except Exception:
+        return -1.0                                   # too big to measure in time
+
+
+def cmd_disk_report():
+    """Measure where the space went. Run detached by the tick (du can take minutes)."""
+    places = [dict(label=l, path=p, gb=du_gb(p)) for l, p in DISK_PLACES]
+    caches = [dict(label=l, path=p, gb=du_gb(p, 120)) for l, p in SAFE_CACHES]
+    st = read_json(DISK_STATE, {}) or {}
+    st.update(checked=now_iso(), checked_ts=time.time(), running=False,
+              places=sorted([x for x in places if x["gb"] != 0], key=lambda x: -x["gb"]),
+              caches=[x for x in caches if x["gb"] > 0],
+              safe_gb=round(sum(x["gb"] for x in caches if x["gb"] > 0), 2))
+    write_json(DISK_STATE, st)
+    return 0
+
+
+def disk_check(used_pct):
+    st = read_json(DISK_STATE, {}) or {}
+    due = time.time() - float(st.get("checked_ts") or 0) > DISK_EVERY
+    if used_pct is not None and used_pct >= 85 and due:          # 6 h apart, so a stuck report retries
+        st.update(running=True, checked_ts=time.time())
+        write_json(DISK_STATE, st)
+        subprocess.Popen([sys.executable, os.path.abspath(__file__), "disk-report"], stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, start_new_session=True)
+    return st
+
+
+def clear_caches():
+    freed = 0.0
+    done = []
+    for label, path in SAFE_CACHES:
+        p = os.path.realpath(os.path.expanduser(path))
+        if not p.startswith(HOME + os.sep) or not os.path.isdir(p):
+            continue
+        gb = du_gb(path, 120)
+        for entry in os.listdir(p):                   # empty the folder, keep the folder itself
+            fp = os.path.join(p, entry)
+            try:
+                if os.path.isdir(fp) and not os.path.islink(fp):
+                    shutil.rmtree(fp)
+                else:
+                    os.remove(fp)
+            except OSError:
+                pass
+        if gb > 0:
+            freed += gb
+            done.append(label)
+    # old Katrina worktrees for missions that are finished
+    for m in all_missions():
+        if m.get("branch") and m.get("state") in ("discarded", "closed", "pushed", "failed", "stopped") \
+                and os.path.isdir(m.get("cwd", "")) and m["cwd"].startswith(WORKTREES):
+            repo = os.path.realpath(os.path.expanduser(m["project"]))
+            git(["worktree", "remove", "--force", m["cwd"]], repo)
+    if shutil.which("xcrun"):
+        brain.run(["xcrun", "simctl", "delete", "unavailable"], timeout=120)
+    st = read_json(DISK_STATE, {}) or {}
+    st.update(cleaned=now_iso(), freed_gb=round(freed, 2), cleaned_what=done, checked_ts=0)
+    write_json(DISK_STATE, st)
+
+
 # ---------------------------------------------------------------- what this Mac is doing
 
 ASKS = re.compile(r"\b(should I|shall I|want me to|would you like|do you want|which (one|option)|let me know|"
@@ -851,11 +945,13 @@ def export_fleet(shared, me, laptop, cfg):
     upd = read_json(UPDATE_STATE, {}) or {}
     h = host()
     h.update(version=upd.get("version", ""), updated=upd.get("updated", ""))
+    dk = disk_check(h.get("disk_used_pct"))
     fleet = dict(v=VERSION, machine=me, laptop=laptop, generated=now_iso(), paired=bool(key()), key_id=key_id(key()),
                  host=h, sessions=sessions(cfg, {m.get("session_id"): m["id"] for m in ms}),
                  missions=[{k: m.get(k) for k in PUBLIC} for m in ms],
                  github=dict(ok=bool(gh.get("ok")), error=gh.get("error", ""), checked=gh.get("checked", ""),
-                             repos=gh.get("repos") or [], results=gh.get("results") or []))
+                             repos=gh.get("repos") or [], results=gh.get("results") or []),
+                 disk={k: dk.get(k) for k in ("checked", "running", "places", "caches", "safe_gb", "cleaned", "freed_gb")})
     write_json(os.path.join(shared, "fleet", me + ".json"), fleet)
     return fleet
 
@@ -950,6 +1046,8 @@ def main(argv):
         return cmd_pair(argv[2] if len(argv) > 2 else None)
     if c == "status":
         return cmd_status()
+    if c == "disk-report":
+        return cmd_disk_report()
     if c == "github-login":
         return cmd_github_login()
     print(__doc__)

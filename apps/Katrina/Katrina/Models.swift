@@ -97,10 +97,32 @@ struct FleetSnapshot: Decodable, Identifiable, Hashable {
     let sessions: [Session]
     let missions: [Mission]
     let github: GitHubView?
+    let disk: Disk?
 
     enum CodingKeys: String, CodingKey {
-        case machine, laptop, generated, paired, host, sessions, missions, github
+        case machine, laptop, generated, paired, host, sessions, missions, github, disk
         case keyId = "key_id"
+    }
+
+    /// Where the space went (measured when the disk is over 85% full) and what "Clear caches" can free.
+    struct Disk: Decodable, Hashable {
+        let checked: String?
+        let running: Bool?
+        let places: [Place]?
+        let caches: [Place]?
+        let safeGb: Double?
+        let cleaned: String?
+        let freedGb: Double?
+
+        struct Place: Decodable, Hashable {
+            let label: String
+            let path: String?
+            let gb: Double
+        }
+        enum CodingKeys: String, CodingKey {
+            case checked, running, places, caches, cleaned
+            case safeGb = "safe_gb", freedGb = "freed_gb"
+        }
     }
 
     /// GitHub as this Mac sees it with its own git login (crew.py github_status).

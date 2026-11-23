@@ -5,7 +5,7 @@ import Foundation
 /// the Mac it names runs it only if the HMAC matches the pairing code both sides hold.
 struct CrewOrder: Encodable {
     enum Kind: String {
-        case mission, followup, push, discard, stop, refresh
+        case mission, followup, push, discard, stop, refresh, cleanup
         case ghMerge = "gh_merge", ghRerun = "gh_rerun", ghOpenPR = "gh_openpr"
     }
     enum Mode: String { case look, work }
