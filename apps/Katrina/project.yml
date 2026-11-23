@@ -19,6 +19,9 @@ targets:
       path: Katrina/Info.plist
       properties:
         CFBundleDisplayName: Katrina PA
+        # XcodeGen otherwise writes a fixed "1.0" / "1"; the upload sets the build number per run
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
         # iPad multitasking needs all four; iPhone keeps upside-down off.
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
