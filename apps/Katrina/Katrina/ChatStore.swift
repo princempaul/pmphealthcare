@@ -299,7 +299,7 @@ final class ChatStore: ObservableObject {
     }
 
     private func githubText(_ github: GitHubStore) -> String {
-        guard github.hasToken else { return "No GitHub token in Settings, so there's no live GitHub view." }
+        guard github.connected else { return "GitHub isn't visible: no token on the phone, and no Mac reports a GitHub login yet." }
         var out: [String] = []
         for r in github.repos {
             out.append("REPO \(r.slug) (default \(r.defaultBranch))\(r.error.map { " error: \($0)" } ?? "")")

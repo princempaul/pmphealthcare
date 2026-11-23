@@ -50,7 +50,39 @@ final class GitHubStore: ObservableObject {
     @Published private(set) var error: String?
     @Published private(set) var busy = false
 
+    /// When the phone has no token, the always-on Mac watches GitHub with its own git login and acts on orders.
+    @Published private(set) var viaMac: String?
+    @Published private(set) var lastResult: FleetSnapshot.GitHubView.ActionResult?
+
     var hasToken: Bool { Keychain.githubToken != nil }
+    var connected: Bool { hasToken || viaMac != nil }
+
+    /// Use what a Mac's crew reports. Called on every refresh when the phone has no token of its own.
+    func adopt(_ view: FleetSnapshot.GitHubView?, from machine: String?) {
+        guard !hasToken else { viaMac = nil; return }
+        guard let view, view.ok == true, let machine else {
+            viaMac = nil; repos = []; error = view?.error; return
+        }
+        viaMac = machine
+        error = nil
+        lastResult = view.results?.first
+        repos = (view.repos ?? []).map { r in
+            var repo = Repo(slug: r.slug)
+            repo.defaultBranch = r.defaultBranch ?? "main"
+            repo.error = (r.error ?? "").isEmpty ? nil : r.error
+            repo.pulls = (r.pulls ?? []).map {
+                Pull(number: $0.number, title: $0.title ?? "", author: $0.author ?? "", draft: $0.draft ?? false,
+                     head: $0.head ?? "", headSha: $0.headSha ?? "", url: $0.url ?? "", updated: $0.updated ?? "",
+                     checks: $0.checks ?? "unknown")
+            }
+            repo.runs = (r.runs ?? []).map {
+                Run(id: $0.id, name: $0.name ?? "", status: $0.status ?? "", conclusion: $0.conclusion,
+                    branch: $0.branch ?? "", url: $0.url ?? "", created: $0.created ?? "")
+            }
+            return repo
+        }
+        lastLoaded = Date()
+    }
     var openPulls: [(repo: Repo, pull: Pull)] { repos.flatMap { r in r.pulls.map { (r, $0) } } }
     var failingRuns: [(repo: Repo, run: Run)] { repos.flatMap { r in r.failing.map { (r, $0) } } }
     var runningRuns: [(repo: Repo, run: Run)] { repos.flatMap { r in r.running.map { (r, $0) } } }
@@ -63,7 +95,7 @@ final class GitHubStore: ObservableObject {
     }
 
     func refresh(slugs: [String]) async {
-        guard let token = Keychain.githubToken else { error = nil; repos = []; return }
+        guard let token = Keychain.githubToken else { return }     // the Mac's view is adopted instead
         guard !busy else { return }
         busy = true
         defer { busy = false }

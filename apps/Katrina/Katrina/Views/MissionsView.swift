@@ -162,15 +162,16 @@ struct MissionDetailView: View {
             }
             if m.state == "pushed", let slug = m.repo, !slug.isEmpty, let branch = m.branch {
                 let existing = github.openPulls.first { $0.repo.slug == slug && $0.pull.head == branch }
-                if let pr = existing {
-                    Button { if let u = URL(string: pr.pull.url) { openURL(u) } } label: {
-                        Label("View pull request #\(pr.pull.number)", systemImage: "arrow.triangle.pull").frame(maxWidth: .infinity)
+                if let url = existing?.pull.url ?? m.pr, !url.isEmpty {
+                    Button { if let u = URL(string: url) { openURL(u) } } label: {
+                        Label(existing.map { "View pull request #\($0.pull.number)" } ?? "View pull request", systemImage: "arrow.triangle.pull")
+                            .frame(maxWidth: .infinity)
                     }.buttonStyle(.bordered).controlSize(.large)
                 } else {
                     Button { openPR(m, slug: slug, branch: branch) } label: {
                         Label("Open pull request", systemImage: "arrow.triangle.pull").frame(maxWidth: .infinity)
-                    }.buttonStyle(.borderedProminent).controlSize(.large).disabled(sending || !github.hasToken)
-                    if !github.hasToken { Text("Add a GitHub token in Settings to open it from here.").font(.caption).foregroundStyle(.secondary) }
+                    }.buttonStyle(.borderedProminent).controlSize(.large).disabled(sending || !github.connected)
+                    if !github.connected { Text("GitHub isn't visible yet. See Settings.").font(.caption).foregroundStyle(.secondary) }
                 }
             }
             if m.isLive {
@@ -207,11 +208,8 @@ struct MissionDetailView: View {
         sending = true
         Task {
             do {
-                let url = try await github.openPull(slug: slug, branch: branch, title: m.title,
-                                                    body: "Opened from Katrina PA. Made by a Katrina mission on `\(branch)`.\n\n\(m.result ?? "")")
-                message = "Pull request opened."
-                await Dispatcher.refresh(brain: brain, github: github)
-                if let u = URL(string: url) { openURL(u) }
+                message = try await Dispatcher.perform(.openPull(machine: ref.machine, mission: m.id, slug: slug, branch: branch, title: m.title),
+                                                       brain: brain, github: github) ?? "Done."
             } catch {
                 message = error.localizedDescription
             }

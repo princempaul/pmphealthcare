@@ -21,10 +21,10 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section {
-                    if paired {
-                        LabeledContent("Pairing", value: "Paired")
+                    if paired || Keychain.pairingCode != nil {
+                        LabeledContent("Pairing", value: brain.pairedAutomatically ? "Paired automatically" : "Paired")
                         ForEach(brain.fleet) { f in
-                            LabeledContent(f.machine, value: f.paired == true ? (f.isOnline ? "Online" : "Offline") : "Not paired on that Mac")
+                            LabeledContent(f.machine, value: brain.pairedWith(f) ? (f.isOnline ? "Online" : "Offline") : "Waiting for its code")
                         }
                         Button("Forget pairing", role: .destructive) { Keychain.pairingCode = nil; paired = false }
                     } else {
@@ -42,7 +42,7 @@ struct SettingsView: View {
                         if let codeError { Text(codeError).font(.footnote).foregroundStyle(Theme.action) }
                     }
                 } header: { Text("Pair with your Macs") } footer: {
-                    Text("Lets this phone send missions to your Macs. Get the code on the iMac: python3 ~/PMPBrain/crew.py pair. Orders are signed with it, so nothing else can command the Macs.")
+                    Text("Happens by itself: the iMac hands this phone its code once through your iCloud folder, then deletes it. Orders are signed with it, so nothing else can command the Macs. To type it instead: python3 ~/PMPBrain/crew.py pair on the iMac.")
                 }
 
                 Section {
@@ -61,11 +61,17 @@ struct SettingsView: View {
                         if let e = github.error { Text(e).font(.footnote).foregroundStyle(Theme.watch) }
                         Button("Remove token", role: .destructive) { Keychain.githubToken = nil; hasToken = false }
                     } else {
-                        SecureField("github_pat_…", text: $token)
+                        if let mac = github.viaMac {
+                            LabeledContent("Using", value: "\(mac)'s GitHub login")
+                            LabeledContent("Repos watched", value: "\(github.repos.count)")
+                        } else if let e = github.error {
+                            Text(e).font(.footnote).foregroundStyle(Theme.watch)
+                        }
+                        SecureField("Optional: github_pat_…", text: $token)
                         Button("Save token") { Keychain.githubToken = token; token = ""; hasToken = Keychain.githubToken != nil }.disabled(token.isEmpty)
                     }
                 } header: { Text("GitHub") } footer: {
-                    Text("A fine-grained token from github.com > Settings > Developer settings, for your repos, with read and write on Pull requests and Actions, and read on Contents. Repos come from your projects automatically.")
+                    Text("Nothing to set up: the iMac watches GitHub with the login it already uses for git, and merges, re-runs and opens PRs when you tap. A token here is optional; it makes GitHub refresh straight from the phone.")
                 }
 
                 Section {
