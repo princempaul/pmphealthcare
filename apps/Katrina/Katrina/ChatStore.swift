@@ -109,6 +109,15 @@ final class ChatStore: ObservableObject {
 
     func reset() { lines = []; history = []; status = ""; proposals = [:] }
 
+    /// Long chats get expensive and slow: keep roughly the last 12 exchanges. Cuts only at a typed question,
+    /// so a tool call is never separated from its result.
+    private func trimHistory(keep: Int = 40) {
+        guard history.count > keep else { return }
+        var cut = history.count - keep
+        while cut < history.count, !(history[cut]["role"] as? String == "user" && history[cut]["content"] is String) { cut += 1 }
+        if cut < history.count { history.removeFirst(cut) }
+    }
+
     private let voiceStyle = """
 
     SPOKEN REPLY: Paul is listening, not reading. Answer in one to three short spoken sentences, most important \
@@ -143,14 +152,18 @@ final class ChatStore: ObservableObject {
         }
         busy = true; status = "Thinking…"
         defer { busy = false; status = "" }
-        let client = ClaudeClient(apiKey: key, model: ClaudeClient.Model(rawValue: modelRaw) ?? .opus)
+        // Spoken questions want speed: Sonnet unless Paul picked Haiku. Typed questions use his chosen model.
+        let chosen = ClaudeClient.Model(rawValue: modelRaw) ?? .opus
+        let client = ClaudeClient(apiKey: key, model: voice && chosen == .opus ? .sonnet : chosen)
+        trimHistory()
         let asOf = brain.lastLoaded.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "not loaded"
-        let system = rules + (voice ? voiceStyle : "") + "\n\nDIGEST (as of \(asOf)):\n" + brain.digest()
+        let system = rules + (voice ? voiceStyle : "")
+        let context = "DIGEST (as of \(asOf)):\n" + brain.digest()
         let start = history.count
         history.append(["role": "user", "content": q])
         do {
             for _ in 0..<8 {
-                let reply = try await client.send(system: system, messages: history, tools: tools)
+                let reply = try await client.send(system: system, context: context, messages: history, tools: tools)
                 let content = reply["content"] as? [[String: Any]] ?? []
                 history.append(["role": "assistant", "content": content])   // unchanged, thinking blocks included
                 let text = content.compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }

@@ -37,7 +37,9 @@ struct ClaudeClient {
     let model: Model
 
     /// One request. `messages` are raw JSON-ready dictionaries (user turns, assistant content arrays, tool results).
-    func send(system: String, messages: [[String: Any]], tools: [[String: Any]]) async throws -> [String: Any] {
+    /// `system` is the stable part (rules) and is cached with the tools; `context` (the live digest) changes
+    /// every refresh, so it goes after the cache breakpoint and doesn't spoil the cache.
+    func send(system: String, context: String = "", messages: [[String: Any]], tools: [[String: Any]]) async throws -> [String: Any] {
         var req = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
         req.httpMethod = "POST"
         req.timeoutInterval = 300
@@ -48,7 +50,8 @@ struct ClaudeClient {
             "model": model.rawValue,
             "max_tokens": 16000,
             // the stable system prompt is cached, so repeat questions cost a fraction
-            "system": [["type": "text", "text": system, "cache_control": ["type": "ephemeral"]] as [String: Any]],
+            "system": [["type": "text", "text": system, "cache_control": ["type": "ephemeral"]] as [String: Any]]
+                + (context.isEmpty ? [] as [[String: Any]] : [["type": "text", "text": context] as [String: Any]]),
             "messages": messages,
             "tools": tools,
             "output_config": ["effort": "low"],

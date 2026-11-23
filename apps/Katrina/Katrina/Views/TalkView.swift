@@ -52,6 +52,9 @@ struct TalkView: View {
         }
         .preferredColorScheme(.dark)
         .task { await listen() }
+        .onChange(of: input.state) { _, st in
+            if case .denied(let why) = st { problem = why; phase = .paused }
+        }
         .onDisappear { input.stop(); output.stop() }
     }
 
@@ -114,6 +117,7 @@ struct TalkView: View {
     private func listen() async {
         output.stop()
         problem = nil
+        input.reset()
         input.onFinished = { text in _ = Task { await respond(to: text) } }
         phase = .listening
         await input.start()
