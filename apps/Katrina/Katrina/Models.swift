@@ -92,9 +92,62 @@ struct FleetSnapshot: Decodable, Identifiable, Hashable {
     let laptop: Bool?
     let generated: String
     let paired: Bool?
+    let keyId: String?
     let host: MacHealth?
     let sessions: [Session]
     let missions: [Mission]
+    let github: GitHubView?
+
+    enum CodingKeys: String, CodingKey {
+        case machine, laptop, generated, paired, host, sessions, missions, github
+        case keyId = "key_id"
+    }
+
+    /// GitHub as this Mac sees it with its own git login (crew.py github_status).
+    struct GitHubView: Decodable, Hashable {
+        let ok: Bool?
+        let error: String?
+        let checked: String?
+        let repos: [Repo]?
+        let results: [ActionResult]?
+
+        struct Repo: Decodable, Hashable {
+            let slug: String
+            let defaultBranch: String?
+            let error: String?
+            let pulls: [Pull]?
+            let runs: [Run]?
+            enum CodingKeys: String, CodingKey { case slug, error, pulls, runs; case defaultBranch = "default_branch" }
+        }
+        struct Pull: Decodable, Hashable {
+            let number: Int
+            let title: String?
+            let author: String?
+            let draft: Bool?
+            let head: String?
+            let headSha: String?
+            let url: String?
+            let updated: String?
+            let checks: String?
+            enum CodingKeys: String, CodingKey { case number, title, author, draft, head, url, updated, checks; case headSha = "head_sha" }
+        }
+        struct Run: Decodable, Hashable {
+            let id: Int
+            let name: String?
+            let status: String?
+            let conclusion: String?
+            let branch: String?
+            let url: String?
+            let created: String?
+        }
+        struct ActionResult: Decodable, Hashable {
+            let kind: String?
+            let ok: Bool?
+            let message: String?
+            let url: String?
+            let at: String?
+        }
+    }
 
     var id: String { machine }
     var generatedDate: Date? { Date.fromBrain(generated) }
@@ -112,9 +165,10 @@ struct FleetSnapshot: Decodable, Identifiable, Hashable {
         let brainQuick: String?
         let brainNightly: String?
         let brainNightlyOk: Bool?
+        let version: String?
 
         enum CodingKeys: String, CodingKey {
-            case load, macos, claude
+            case load, macos, claude, version
             case diskFreeGb = "disk_free_gb", diskUsedPct = "disk_used_pct", uptimeH = "uptime_h"
             case batteryPct = "battery_pct", brainQuick = "brain_quick", brainNightly = "brain_nightly"
             case brainNightlyOk = "brain_nightly_ok"
@@ -159,6 +213,7 @@ struct FleetSnapshot: Decodable, Identifiable, Hashable {
         let costUsd: Double?
         let numTurns: Int?
         let error: String?
+        let pr: String?
 
         struct Turn: Decodable, Hashable {
             let who: String
@@ -172,7 +227,7 @@ struct FleetSnapshot: Decodable, Identifiable, Hashable {
 
         enum CodingKeys: String, CodingKey {
             case id, mode, project, prompt, created, started, finished, updated, state, result, turns
-            case branch, commits, diffstat, compare, repo, error
+            case branch, commits, diffstat, compare, repo, error, pr
             case projectName = "project_name", costUsd = "cost_usd", numTurns = "num_turns"
         }
     }

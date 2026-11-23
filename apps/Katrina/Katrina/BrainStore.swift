@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import SwiftUI
 
@@ -107,6 +108,7 @@ final class BrainStore: ObservableObject {
             if let data = readCoordinated(f), let snap = try? JSONDecoder().decode(FleetSnapshot.self, from: data) { crews.append(snap) }
         }
         fleet = crews.sorted { ($0.laptop ?? false ? 1 : 0, $0.machine) < ($1.laptop ?? false ? 1 : 0, $1.machine) }
+        autoPair(folder)
         let report = folder.appendingPathComponent("latest-nightly.md")
         if let data = readCoordinated(report) { nightlyReport = String(decoding: data, as: UTF8.self) }
         error = loaded.isEmpty ? "No Mac snapshots found yet in \(folder.lastPathComponent)/machines. Run the installer on a Mac and wait for its hourly update." : nil
@@ -156,6 +158,54 @@ final class BrainStore: ObservableObject {
         } catch {
             throw NoteError.write(error.localizedDescription)
         }
+    }
+
+    // MARK: pairing without typing a code
+
+    @Published private(set) var pairedAutomatically = UserDefaults.standard.bool(forKey: "paired.auto")
+
+    static func keyId(_ code: String) -> String {
+        SHA256.hash(data: Data(code.utf8)).map { String(format: "%02x", $0) }.joined().prefix(8).description
+    }
+
+    /// The Macs leave their pairing code in PMPBrain/pairing once. Take it (the always-on Mac's wins), say thanks
+    /// with an ack file so they delete it. Re-take it if the always-on Mac has been re-keyed since.
+    private func autoPair(_ folder: URL) {
+        let dir = folder.appendingPathComponent("pairing")
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return }
+        struct Offer { let machine: String; let laptop: Bool; let code: String }
+        var offers: [Offer] = []
+        for f in files where f.pathExtension == "json" && !f.lastPathComponent.hasPrefix("ack-") {
+            try? fm.startDownloadingUbiquitousItem(at: f)
+            guard let data = readCoordinated(f),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let machine = obj["machine"] as? String,
+                  let code = CrewOrder.normalise(obj["code"] as? String ?? "") else { continue }
+            offers.append(Offer(machine: machine, laptop: obj["laptop"] as? Bool ?? false, code: code))
+        }
+        guard !offers.isEmpty else { return }
+        let best = offers.first { !$0.laptop } ?? offers[0]
+        let current = Keychain.pairingCode
+        let commandKey = fleet.first { $0.machine == best.machine }?.keyId
+        if current == nil || (current != best.code && !best.laptop && commandKey == Self.keyId(best.code)) {
+            Keychain.pairingCode = best.code
+            pairedAutomatically = true
+            UserDefaults.standard.set(true, forKey: "paired.auto")
+        }
+        guard let mine = Keychain.pairingCode else { return }
+        for o in offers where o.code == mine {
+            let ack: [String: String] = ["machine": o.machine, "device": "Katrina PA"]
+            if let data = try? JSONSerialization.data(withJSONObject: ack) {
+                try? data.write(to: dir.appendingPathComponent("ack-\(o.machine).json"), options: .atomic)
+            }
+        }
+    }
+
+    /// Does this phone hold the same pairing code as that Mac?
+    func pairedWith(_ f: FleetSnapshot) -> Bool {
+        guard let code = Keychain.pairingCode, let k = f.keyId, !k.isEmpty else { return false }
+        return Self.keyId(code) == k
     }
 
     // MARK: orders for the Macs' ground crew

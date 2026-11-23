@@ -44,9 +44,10 @@ enum TowerBoard {
             items.append(TowerItem(id: "setup-pair", level: .action, icon: "link.badge.plus", title: "Pair with your Macs",
                                    detail: "Lets you send missions to the iMac. On the Mac run: python3 ~/PMPBrain/crew.py pair", source: "Setup", tap: .settings))
         }
-        if !github.hasToken {
-            items.append(TowerItem(id: "setup-github", level: .info, icon: "chevron.left.forwardslash.chevron.right", title: "Add a GitHub token",
-                                   detail: "Shows pull requests and builds across every repo, and lets you merge from here.", source: "Setup", tap: .settings))
+        if !github.connected && !brain.fleet.isEmpty {
+            items.append(TowerItem(id: "setup-github", level: .info, icon: "chevron.left.forwardslash.chevron.right", title: "GitHub isn't visible yet",
+                                   detail: github.error ?? "The iMac uses its own GitHub login once it has pushed code once. Or add a token in Settings.",
+                                   source: "Setup", tap: .settings))
         }
 
         // The Macs themselves.
@@ -69,7 +70,8 @@ enum TowerBoard {
                                        tap: .mission(machine: machine, id: m.id)))
             case "pushed":
                 let branch = m.branch ?? ""
-                if let slug = m.repo, !slug.isEmpty, !pulls.contains(where: { $0.repo.slug == slug && $0.pull.head == branch }) {
+                if let slug = m.repo, !slug.isEmpty, (m.pr ?? "").isEmpty,
+                   !pulls.contains(where: { $0.repo.slug == slug && $0.pull.head == branch }) {
                     items.append(TowerItem(id: "m-\(m.id)-pr", level: .action, icon: "arrow.triangle.pull",
                                            title: "Open a pull request: \(m.title)", detail: "\(slug) · \(branch)", source: "Mission on \(machine)",
                                            primary: (label: "Open PR", action: .openPull(machine: machine, mission: m.id, slug: slug, branch: branch, title: m.title)),
@@ -176,6 +178,20 @@ enum Dispatcher {
         case .approvePush(let machine, let id):
             try brain.send(CrewOrder(kind: .push, machine: machine, mission: id))
             return "Sent. \(machine) pushes the branch within a minute."
+        case .openPull(_, _, let slug, let branch, let title) where !github.hasToken:
+            guard let mac = github.viaMac else { throw GitHubStore.GitHubError.noToken }
+            try brain.send(CrewOrder(kind: .ghOpenPR, machine: mac, project: slug, prompt: title, mission: branch))
+            return "Sent. \(mac) opens the pull request within a minute."
+        case .merge(let slug, let number) where !github.hasToken:
+            guard let mac = github.viaMac,
+                  let pull = github.repos.first(where: { $0.slug == slug })?.pulls.first(where: { $0.number == number })
+            else { throw GitHubStore.GitHubError.noToken }
+            try brain.send(CrewOrder(kind: .ghMerge, machine: mac, project: slug, prompt: pull.headSha, mission: "\(number)"))
+            return "Sent. \(mac) merges #\(number) within a minute."
+        case .rerun(let slug, let run) where !github.hasToken:
+            guard let mac = github.viaMac else { throw GitHubStore.GitHubError.noToken }
+            try brain.send(CrewOrder(kind: .ghRerun, machine: mac, project: slug, mission: "\(run)"))
+            return "Sent. \(mac) re-runs it within a minute."
         case .openPull(_, _, let slug, let branch, let title):
             let url = try await github.openPull(slug: slug, branch: branch, title: title,
                                                 body: "Opened from Katrina PA. Made by a Katrina mission on branch `\(branch)`.")
@@ -199,7 +215,19 @@ enum Dispatcher {
 
     static func refresh(brain: BrainStore, github: GitHubStore) async {
         await brain.reload()
-        let slugs = brain.projects.compactMap { GitHubStore.slug(fromRemote: $0.project.remote) }
-        await github.refresh(slugs: slugs)
+        if github.hasToken {
+            let slugs = brain.projects.compactMap { GitHubStore.slug(fromRemote: $0.project.remote) }
+            await github.refresh(slugs: slugs)
+        } else {
+            adoptGitHub(brain: brain, github: github)
+        }
+    }
+
+    /// No token on the phone: show GitHub as the always-on Mac sees it.
+    static func adoptGitHub(brain: BrainStore, github: GitHubStore) {
+        let mac = brain.fleet.filter { $0.github?.ok == true }
+            .sorted { (($0.laptop ?? false) ? 1 : 0) < (($1.laptop ?? false) ? 1 : 0) }.first
+            ?? brain.commandMac
+        github.adopt(mac?.github, from: mac?.machine)
     }
 }

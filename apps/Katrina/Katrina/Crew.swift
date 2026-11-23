@@ -4,7 +4,10 @@ import Foundation
 /// An instruction for a Mac's ground crew (crew.py). The phone writes it to PMPBrain/orders/<id>.json;
 /// the Mac it names runs it only if the HMAC matches the pairing code both sides hold.
 struct CrewOrder: Encodable {
-    enum Kind: String { case mission, followup, push, discard, stop, refresh }
+    enum Kind: String {
+        case mission, followup, push, discard, stop, refresh
+        case ghMerge = "gh_merge", ghRerun = "gh_rerun", ghOpenPR = "gh_openpr"
+    }
     enum Mode: String { case look, work }
 
     let v = 1

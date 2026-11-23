@@ -14,6 +14,7 @@ cp "$SRC/brain/config.json" "$DEST/config.default.json"
 cp "$SRC/katrina/registry.md" "$DEST/registry.md"
 cp "$SRC/brain/katrina_local.py" "$DEST/katrina_local.py"
 cp "$SRC/brain/crew.py" "$DEST/crew.py"
+echo "$SRC" > "$DEST/src-path"   # the crew keeps this checkout up to date
 
 # Personal Assistant Katrina: the agent itself, and a `katrina` command to start her.
 mkdir -p "$HOME/.claude/agents" "$DEST/bin"
@@ -103,5 +104,5 @@ echo "Done. Tonight's report: $DEST/reports/. Phone copy: iCloud Drive > PMPBrai
 echo "Tip: give /usr/bin/python3 Full Disk Access (System Settings > Privacy & Security) so the Time Machine check works."
 echo "Free local Katrina (no Claude needed): run ./local-ai-setup.sh once, then: katrina-local"
 echo
-echo "Katrina PA command centre: pair your phone with this code (Settings > Pair with your Macs):"
+echo "Katrina PA command centre: your phone pairs itself through iCloud. The code, in case you need it:"
 /usr/bin/python3 "$DEST/crew.py" pair

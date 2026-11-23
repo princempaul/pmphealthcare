@@ -9,7 +9,7 @@ Every 20 seconds (launchd) it:
 
   crew.py tick          one pass (what launchd runs)
   crew.py pair          show this Mac's pairing code (makes one the first time)
-  crew.py pair CODE     use the code from the other Mac, so the phone can command both
+  crew.py pair CODE     use a specific code (normally not needed: Macs and phone share it through iCloud)
   crew.py status        what's running
 
 Safety, by design:
@@ -146,14 +146,17 @@ def cmd_pair(code=None):
     else:
         c = key()
         if not c:
-            c = "".join(secrets.choice(ALPHABET) for _ in range(16))
+            shared = brain.shared_dir(brain.load_config())
+            offers = published_codes(shared, brain.machine_name()) if shared else []
+            c = offers[0][1] if offers else "".join(secrets.choice(ALPHABET) for _ in range(16))
     os.makedirs(BASE, exist_ok=True)
     with open(KEY_FILE, "w") as f:
         f.write(c)
     os.chmod(KEY_FILE, 0o600)
     pretty = "-".join(c[i:i + 4] for i in range(0, 16, 4))
     print("Pairing code: %s" % pretty)
-    print("On your phone: Katrina PA > Settings > Pair with your Macs, and type it in.")
+    print("Your phone picks this up by itself through iCloud within a minute or two (Katrina PA > Settings shows Paired).")
+    print("If it doesn't, type it in: Katrina PA > Settings > Pair with your Macs.")
     print("Using two Macs? On the other one run:  python3 ~/PMPBrain/crew.py pair %s" % pretty)
     return 0
 
@@ -355,7 +358,7 @@ def start_queued():
 
 
 def github_slug(remote):
-    m = re.search(r"github\.com[:/]([^/]+/[^/.]+?)(?:\.git)?$", remote or "")
+    m = re.search(r"github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$", remote or "")
     return m.group(1) if m else ""
 
 
@@ -365,6 +368,9 @@ def handle(order, projects):
     kind = order.get("kind")
     if kind == "mission":
         new_mission(order, projects)
+        return
+    if kind in ("gh_merge", "gh_rerun", "gh_openpr"):
+        gh_order(order)
         return
     if kind == "refresh":
         subprocess.Popen([sys.executable, os.path.join(BASE, "brain.py"), "quick"],
@@ -392,6 +398,13 @@ def handle(order, projects):
             m.update(state="pushed", error="",
                      compare="https://github.com/%s/compare/%s?expand=1" % (slug, m["branch"]) if slug else "",
                      repo=slug)
+            token = github_token() if slug else None
+            if token:
+                url, msg = open_pr(slug, m["branch"], m.get("prompt") or "Katrina mission", m.get("result") or "", token)
+                m["pr"] = url
+                if not url:
+                    m["error"] = msg
+                github_status(force=True)
     elif kind == "discard" and m.get("state") not in ("running",):
         if m.get("branch"):
             repo = os.path.realpath(os.path.expanduser(m["project"]))
@@ -443,6 +456,274 @@ def take_orders(shared, me, laptop):
         n += 1
     write_json(seen_file, sorted(seen)[-2000:])
     return n
+
+
+# ---------------------------------------------------------------- GitHub on Paul's behalf
+
+GH_STATE = os.path.join(BASE, "crew-github.json")
+GH_EVERY = 120
+
+
+def github_token():
+    """The GitHub login this Mac already uses for git (Keychain through git's credential helper, or gh).
+    Read fresh each time, used only for api.github.com, never written anywhere."""
+    env = {k: v for k, v in os.environ.items() if k not in ("GIT_ASKPASS", "SSH_ASKPASS")}
+    env.update(GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="never")
+    try:
+        out = subprocess.run(["git", "credential", "fill"], input="protocol=https\nhost=github.com\n\n",
+                             capture_output=True, text=True, timeout=15, env=env)
+        for line in out.stdout.splitlines():
+            if line.startswith("password=") and len(line) > 9:
+                return line[9:].strip()
+    except Exception:
+        pass
+    for gh in (shutil.which("gh"), "/opt/homebrew/bin/gh", "/usr/local/bin/gh"):
+        if gh and os.path.exists(gh):
+            t = brain.run([gh, "auth", "token"])
+            if t:
+                return t
+    return None
+
+
+def gh_api(method, path, token, body=None):
+    import urllib.error
+    import urllib.request
+    req = urllib.request.Request("https://api.github.com" + path, method=method,
+                                 data=json.dumps(body).encode() if body is not None else None,
+                                 headers={"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
+                                          "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "katrina-crew",
+                                          "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            raw = r.read()
+            return r.status, (json.loads(raw) if raw else {})
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read() or b"{}")
+        except ValueError:
+            return e.code, {}
+    except Exception as e:
+        return 0, {"message": str(e)[:200]}
+
+
+def gh_repo(slug, token):
+    r = dict(slug=slug, default_branch="main", pulls=[], runs=[], error="")
+    code, info = gh_api("GET", "/repos/%s" % slug, token)
+    if code != 200:
+        r["error"] = "GitHub said %s: %s" % (code, clean((info or {}).get("message", ""), 120))
+        return r
+    r["default_branch"] = info.get("default_branch") or "main"
+    _, pulls = gh_api("GET", "/repos/%s/pulls?state=open&per_page=20" % slug, token)
+    for p in (pulls if isinstance(pulls, list) else [])[:10]:
+        head = p.get("head") or {}
+        pull = dict(number=p.get("number", 0), title=clean(p.get("title"), 200),
+                    author=(p.get("user") or {}).get("login", ""), draft=bool(p.get("draft")),
+                    head=head.get("ref", ""), head_sha=head.get("sha", ""), url=p.get("html_url", ""),
+                    updated=p.get("updated_at", ""), checks="unknown")
+        c, cr = gh_api("GET", "/repos/%s/commits/%s/check-runs?per_page=50" % (slug, pull["head_sha"]), token)
+        runs = (cr or {}).get("check_runs") if c == 200 else None
+        if runs is not None:
+            concl = [x.get("conclusion") for x in runs]
+            if not runs:
+                pull["checks"] = "none"
+            elif any(x in ("failure", "timed_out", "cancelled", "action_required") for x in concl):
+                pull["checks"] = "failing"
+            elif any(x.get("status") != "completed" for x in runs):
+                pull["checks"] = "pending"
+            else:
+                pull["checks"] = "passing"
+        r["pulls"].append(pull)
+    _, runs = gh_api("GET", "/repos/%s/actions/runs?per_page=15" % slug, token)
+    for x in (runs or {}).get("workflow_runs", []) if isinstance(runs, dict) else []:
+        r["runs"].append(dict(id=x.get("id", 0), name=x.get("name", ""), status=x.get("status", ""),
+                              conclusion=x.get("conclusion"), branch=x.get("head_branch", ""),
+                              url=x.get("html_url", ""), created=x.get("created_at", "")))
+    return r
+
+
+def github_status(force=False):
+    st = read_json(GH_STATE, {}) or {}
+    if not force and time.time() - float(st.get("checked_ts") or 0) < GH_EVERY:
+        return st
+    token = github_token()
+    st["checked_ts"] = time.time()
+    st["checked"] = now_iso()
+    if not token:
+        st.update(ok=False, repos=[], error="This Mac has no GitHub login stored for git.")
+    else:
+        slugs = sorted({github_slug(v[2]) for v in known_projects().values() if github_slug(v[2])})
+        st.update(ok=True, error="", repos=[gh_repo(sl, token) for sl in slugs])
+    write_json(GH_STATE, st)
+    return st
+
+
+def gh_result(kind, ok, message, url=""):
+    st = read_json(GH_STATE, {}) or {}
+    res = st.get("results") or []
+    res.insert(0, dict(kind=kind, ok=ok, message=clean(message, 300), url=url, at=now_iso()))
+    st["results"] = res[:15]
+    st["checked_ts"] = 0                      # refresh on this tick, so the phone sees the change
+    write_json(GH_STATE, st)
+
+
+def gh_order(order):
+    token = github_token()
+    kind, slug = order.get("kind"), str(order.get("project", ""))
+    if not re.match(r"^[\w.-]+/[\w.-]+$", slug):
+        return
+    if not token:
+        gh_result(kind, False, "This Mac has no GitHub login stored for git.")
+        return
+    if kind == "gh_merge":
+        code, r = gh_api("PUT", "/repos/%s/pulls/%s/merge" % (slug, order.get("mission")), token,
+                         {"merge_method": "merge", "sha": order.get("prompt") or None})
+        gh_result(kind, code == 200, "Merged %s #%s." % (slug.split("/")[-1], order.get("mission")) if code == 200
+                  else "Merge refused (%s): %s" % (code, r.get("message", "")))
+    elif kind == "gh_rerun":
+        code, r = gh_api("POST", "/repos/%s/actions/runs/%s/rerun-failed-jobs" % (slug, order.get("mission")), token)
+        gh_result(kind, code in (200, 201), "Re-running the failed jobs." if code in (200, 201)
+                  else "Re-run refused (%s): %s" % (code, r.get("message", "")))
+    elif kind == "gh_openpr":
+        url, msg = open_pr(slug, str(order.get("mission", "")), str(order.get("prompt", "")) or "Katrina mission", "", token)
+        gh_result(kind, bool(url), msg, url)
+
+
+def open_pr(slug, branch, title, body, token):
+    st = read_json(GH_STATE, {}) or {}
+    base = next((r.get("default_branch") for r in st.get("repos") or [] if r.get("slug") == slug), None)
+    if not base:
+        _, info = gh_api("GET", "/repos/%s" % slug, token)
+        base = (info or {}).get("default_branch") or "main"
+    code, r = gh_api("POST", "/repos/%s/pulls" % slug, token,
+                     {"title": clean(title, 120), "head": branch, "base": base, "draft": True,
+                      "body": "Opened from Katrina PA. Made by a Katrina mission on `%s`.\n\n%s" % (branch, body)})
+    if code == 201:
+        return r.get("html_url", ""), "Draft pull request opened."
+    return "", "Couldn't open the pull request (%s): %s" % (code, r.get("message", ""))
+
+
+# ---------------------------------------------------------------- pairing the phone, without typing a code
+
+PAIR_STATE = os.path.join(BASE, "crew-pairing.json")
+
+
+def key_id(k):
+    return hashlib.sha256(k.encode()).hexdigest()[:8] if k else ""
+
+
+def save_key(c):
+    os.makedirs(BASE, exist_ok=True)
+    with open(KEY_FILE, "w") as f:
+        f.write(c)
+    os.chmod(KEY_FILE, 0o600)
+
+
+def published_codes(shared, me):
+    out = []
+    for fp in glob.glob(os.path.join(shared, "pairing", "*.json")):
+        if os.path.basename(fp).startswith("ack-"):
+            continue
+        d = read_json(fp) or {}
+        c = norm_code(str(d.get("code", "")))
+        if d.get("machine") != me and len(c) == 16 and all(ch in ALPHABET for ch in c):
+            out.append((bool(d.get("laptop")), c))
+    return sorted(out)                       # the always-on Mac's code first
+
+
+def pairing(shared, me, laptop):
+    """Hand the code to the phone (and the other Mac) once, through Paul's own iCloud folder, then delete it.
+    The always-on Mac's code wins, so both Macs and the phone end up with the same one."""
+    pd = os.path.join(shared, "pairing")
+    st = read_json(PAIR_STATE, {}) or {}
+    k = key()
+    offers = published_codes(shared, me)
+    if offers and (not k or (laptop and not st.get("phone") and not offers[0][0] and offers[0][1] != k)):
+        k = offers[0][1]
+        save_key(k)
+        st["adopted"] = now_iso()
+    if not k:
+        return
+    ack = os.path.join(pd, "ack-%s.json" % me)
+    if os.path.exists(ack):
+        st["phone"] = now_iso()
+        for fp in (ack, os.path.join(pd, me + ".json")):
+            try:
+                os.remove(fp)
+            except OSError:
+                pass
+    peers_differ = False
+    for fp in glob.glob(os.path.join(shared, "fleet", "*.json")):
+        f = read_json(fp) or {}
+        if f.get("machine") != me and f.get("key_id") != key_id(k):
+            try:
+                fresh = time.time() - os.path.getmtime(fp) < 3600
+            except OSError:
+                fresh = False
+            peers_differ = peers_differ or fresh
+    mine = os.path.join(pd, me + ".json")
+    if (not st.get("phone") or (peers_differ and not laptop)):
+        if not os.path.exists(mine):
+            write_json(mine, dict(machine=me, laptop=laptop, code=k, created=now_iso()))
+    elif os.path.exists(mine) and not peers_differ:
+        try:
+            os.remove(mine)
+        except OSError:
+            pass
+    write_json(PAIR_STATE, st)
+
+
+# ---------------------------------------------------------------- keeping itself up to date
+
+UPDATE_STATE = os.path.join(BASE, "crew-update.json")
+
+
+def src_dir():
+    try:
+        with open(os.path.join(BASE, "src-path")) as f:
+            p = f.read().strip()
+            if p:
+                return p
+    except OSError:
+        pass
+    return os.path.join(HOME, "pmp-brain-src")
+
+
+def self_update():
+    """Every 6 hours: fast-forward the pmphealthcare checkout and refresh the brain, crew and Katrina files.
+    Only when the checkout is clean and the update is a plain fast-forward; never touches Paul's own edits."""
+    st = read_json(UPDATE_STATE, {}) or {}
+    if time.time() - float(st.get("checked_ts") or 0) < 6 * 3600:
+        return st
+    st["checked_ts"] = time.time()
+    src = src_dir()
+    if os.path.isdir(os.path.join(src, ".git")):
+        code, dirty = git(["status", "--porcelain", "--untracked-files=no"], src)
+        if not code and not dirty.strip():
+            git(["fetch", "--quiet"], src, timeout=120)
+            code, behind = git(["rev-list", "--count", "HEAD..@{u}"], src)
+            if not code and behind.strip().isdigit() and int(behind) > 0:
+                code, out = git(["merge", "--ff-only", "@{u}"], src)
+                if not code:
+                    copies = [("brain/brain.py", os.path.join(BASE, "brain.py")),
+                              ("brain/crew.py", os.path.join(BASE, "crew.py")),
+                              ("brain/katrina_local.py", os.path.join(BASE, "katrina_local.py")),
+                              ("brain/config.json", os.path.join(BASE, "config.default.json")),
+                              ("katrina/registry.md", os.path.join(BASE, "registry.md"))]
+                    copies += [(os.path.relpath(fp, src), os.path.join(HOME, ".claude", "agents", os.path.basename(fp)))
+                               for fp in glob.glob(os.path.join(src, ".claude", "agents", "katrina*.md"))]
+                    for rel, dst in copies:
+                        s_ = os.path.join(src, rel)
+                        if os.path.isfile(s_):
+                            os.makedirs(os.path.dirname(dst), exist_ok=True)
+                            shutil.copy2(s_, dst + ".new")
+                            os.replace(dst + ".new", dst)
+                    st["updated"] = now_iso()
+                else:
+                    st["error"] = clean(out, 200)
+        _, head = git(["rev-parse", "--short", "HEAD"], src)
+        st["version"] = head.strip()
+    write_json(UPDATE_STATE, st)
+    return st
 
 
 # ---------------------------------------------------------------- what this Mac is doing
@@ -553,14 +834,20 @@ def host():
 
 PUBLIC = ("id", "kind", "mode", "project", "project_name", "prompt", "created", "started", "finished",
           "updated", "state", "result", "turns", "branch", "commits", "diffstat", "compare", "repo",
-          "cost_usd", "num_turns", "error", "session_id")
+          "cost_usd", "num_turns", "error", "session_id", "pr")
 
 
 def export_fleet(shared, me, laptop, cfg):
     ms = all_missions()[:30]
-    fleet = dict(v=VERSION, machine=me, laptop=laptop, generated=now_iso(), paired=bool(key()),
-                 host=host(), sessions=sessions(cfg, {m.get("session_id"): m["id"] for m in ms}),
-                 missions=[{k: m.get(k) for k in PUBLIC} for m in ms])
+    gh = github_status()
+    upd = read_json(UPDATE_STATE, {}) or {}
+    h = host()
+    h.update(version=upd.get("version", ""), updated=upd.get("updated", ""))
+    fleet = dict(v=VERSION, machine=me, laptop=laptop, generated=now_iso(), paired=bool(key()), key_id=key_id(key()),
+                 host=h, sessions=sessions(cfg, {m.get("session_id"): m["id"] for m in ms}),
+                 missions=[{k: m.get(k) for k in PUBLIC} for m in ms],
+                 github=dict(ok=bool(gh.get("ok")), error=gh.get("error", ""), checked=gh.get("checked", ""),
+                             repos=gh.get("repos") or [], results=gh.get("results") or []))
     write_json(os.path.join(shared, "fleet", me + ".json"), fleet)
     return fleet
 
@@ -580,10 +867,15 @@ def cmd_tick():
         print("No shared folder (iCloud Drive) on this Mac.")
         return 1
     me, laptop = brain.machine_name(), brain.is_laptop()
+    pairing(shared, me, laptop)
     take_orders(shared, me, laptop)
     check_running()
     start_queued()
     export_fleet(shared, me, laptop, cfg)
+    try:
+        self_update()
+    except Exception as e:                 # an update problem must never stop the crew
+        print("update check failed: %s" % e)
     return 0
 
 

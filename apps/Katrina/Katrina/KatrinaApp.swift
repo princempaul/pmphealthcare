@@ -46,7 +46,8 @@ struct KatrinaApp: App {
         var tick = 0
         while !Task.isCancelled {
             await brain.reload()
-            if tick % 4 == 0 { await github.refresh(slugs: slugs) }
+            if github.hasToken { if tick % 4 == 0 { await github.refresh(slugs: slugs) } }
+            else { Dispatcher.adoptGitHub(brain: brain, github: github) }
             if tick % 8 == 0 { await sites.refresh() }
             Notifier.update(with: TowerBoard.needsYou(brain: brain, github: github, sites: sites))
             tick += 1
@@ -59,8 +60,7 @@ struct KatrinaApp: App {
 
     @MainActor
     private func refreshAll() async {
-        await brain.reload()
-        await github.refresh(slugs: slugs)
+        await Dispatcher.refresh(brain: brain, github: github)
         await sites.refresh()
     }
 

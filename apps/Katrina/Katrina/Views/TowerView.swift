@@ -102,8 +102,8 @@ struct TowerView: View {
             TowerGauge(icon: "scope", label: "Missions", value: "\(liveMissions)", sub: "running",
                   color: liveMissions > 0 ? Theme.live : .secondary, pulsing: liveMissions > 0)
                 .onTapGesture { tab = 2 }
-            TowerGauge(icon: "hammer", label: "Builds", value: github.hasToken ? "\(failing)" : "–", sub: "failing",
-                  color: !github.hasToken ? .secondary : failing > 0 ? Theme.action : Theme.ok)
+            TowerGauge(icon: "hammer", label: "Builds", value: github.connected ? "\(failing)" : "–", sub: "failing",
+                  color: !github.connected ? .secondary : failing > 0 ? Theme.action : Theme.ok)
             TowerGauge(icon: "globe", label: "Sites", value: sites.sites.isEmpty ? "–" : "\(up)/\(sites.sites.count)", sub: "up",
                   color: sites.sites.isEmpty ? .secondary : up == sites.sites.count ? Theme.ok : Theme.action)
         }
@@ -213,7 +213,7 @@ struct TowerView: View {
                 stat("Uptime", h?.uptimeH.map { $0 < 48 ? "\(Int($0))h" : "\(Int($0 / 24))d" } ?? "–")
                 stat(f.laptop == true ? "Battery" : "Load", f.laptop == true ? (h?.batteryPct.map { "\($0)%" } ?? "–") : (h?.load.map { String(format: "%.1f", $0) } ?? "–"))
                 stat("Claude Code", h?.claude == true ? "Ready" : "Missing", warn: h?.claude != true)
-                stat("Paired", f.paired == true ? "Yes" : "No", warn: f.paired != true)
+                stat("Paired", brain.pairedWith(f) ? "Yes" : (f.paired == true ? "Code differs" : "No"), warn: !brain.pairedWith(f))
                 stat("Projects", snap.map { "\($0.projects.count)" } ?? "–")
             }
         }
