@@ -9,6 +9,7 @@ struct KatrinaApp: App {
     @StateObject private var chat = ChatStore.shared
     @StateObject private var github = GitHubStore.shared
     @StateObject private var sites = SiteMonitor.shared
+    @StateObject private var np = NPSession.shared
     @AppStorage("appearance") private var appearance = 2   // 0 system, 1 light, 2 dark (the tower default)
     @Environment(\.scenePhase) private var phase
 
@@ -21,6 +22,7 @@ struct KatrinaApp: App {
                 .environmentObject(chat)
                 .environmentObject(github)
                 .environmentObject(sites)
+                .environmentObject(np)
                 .tint(Theme.accent)
                 .preferredColorScheme(appearance == 1 ? .light : appearance == 2 ? .dark : nil)
                 .task(id: phase) { await liveLoop() }

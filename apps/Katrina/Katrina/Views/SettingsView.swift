@@ -5,6 +5,7 @@ struct SettingsView: View {
     @EnvironmentObject var chat: ChatStore
     @EnvironmentObject var github: GitHubStore
     @EnvironmentObject var sites: SiteMonitor
+    @EnvironmentObject var np: NPSession
     @AppStorage("appearance") private var appearance = 2
     @AppStorage("sites") private var siteList = SiteMonitor.defaultList
     @AppStorage("notify") private var notify = true
@@ -91,6 +92,27 @@ struct SettingsView: View {
                     }
                 } header: { Text("Katrina (Dispatch)") } footer: {
                     Text("Dispatch uses an Anthropic API key from console.anthropic.com, billed per use. Higher thinking and Fable cost more; spoken questions always use Sonnet at low. Missions on your Macs use your Claude subscription there instead. The Tower never uses either.")
+                }
+
+                Section {
+                    if np.hasPin {
+                        Toggle("Face ID / Touch ID", isOn: $np.faceID).disabled(!np.biometricsAvailable)
+                        Picker("Lock after", selection: $np.autoLockSeconds) {
+                            Text("Every time").tag(0)
+                            Text("1 minute").tag(60)
+                            Text("5 minutes").tag(300)
+                            Text("15 minutes").tag(900)
+                        }
+                        if np.unlocked {
+                            Button("Remove NP login", role: .destructive) { np.removeLogin() }
+                        } else {
+                            Text("Open the NP desk to change or remove the login.").font(.footnote).foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Text("Not set up yet. Open the NP desk tab to create your PIN.").foregroundStyle(.secondary)
+                    }
+                } header: { Text("NP desk login") } footer: {
+                    Text("A 6-digit PIN of its own, kept on this device only. Five wrong tries in a row lock it for a while. It locks again when the app has been away.")
                 }
 
                 Section {
