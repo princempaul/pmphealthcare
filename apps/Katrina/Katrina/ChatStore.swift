@@ -51,6 +51,10 @@ final class ChatStore: ObservableObject {
         didSet { UserDefaults.standard.set(modelRaw, forKey: "model") }
     }
 
+    @Published var effortRaw: String = UserDefaults.standard.string(forKey: "effort") ?? ClaudeClient.Effort.low.rawValue {
+        didSet { UserDefaults.standard.set(effortRaw, forKey: "effort") }
+    }
+
     private var history: [[String: Any]] = []   // exact API transcript, append-only
 
     private let rules = """
@@ -70,6 +74,8 @@ final class ChatStore: ObservableObject {
       commits on its own branch in a separate worktree; Paul approves the push later. Write mission instructions \
       the way you'd brief a senior engineer: goal, where to look, what done looks like, what not to touch.
     - Prefer one well-scoped mission over several vague ones. Pick look unless he asked for a change.
+    - End every mission brief with a finish line, e.g. "Keep going until the build passes and nothing else changed", \
+      so the session works until it is actually done instead of stopping at the first plausible answer.
     - You can't send email, post, pay, sign or deploy. Say so plainly and offer a mission that drafts it instead.
 
     Rules that outrank everything: no patient or resident name, initials, date of birth, health card number or \
@@ -155,7 +161,9 @@ final class ChatStore: ObservableObject {
         defer { busy = false; status = "" }
         // Spoken questions want speed: Sonnet unless Paul picked Haiku. Typed questions use his chosen model.
         let chosen = ClaudeClient.Model(rawValue: modelRaw) ?? .opus
-        let client = ClaudeClient(apiKey: key, model: voice && chosen == .opus ? .sonnet : chosen)
+        let fast = voice && (chosen == .opus || chosen == .fable)
+        let client = ClaudeClient(apiKey: key, model: fast ? .sonnet : chosen,
+                                  effort: voice ? .low : (ClaudeClient.Effort(rawValue: effortRaw) ?? .low))
         trimHistory()
         let asOf = brain.lastLoaded.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "not loaded"
         let system = rules + (voice ? voiceStyle : "")
