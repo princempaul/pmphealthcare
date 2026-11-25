@@ -4,10 +4,11 @@ import Foundation
 /// Keeps every assistant turn's content blocks exactly as returned and sends them back unchanged.
 struct ClaudeClient {
     enum Model: String, CaseIterable, Identifiable {
-        case opus = "claude-opus-5-5", sonnet = "claude-sonnet-5-5", haiku = "claude-haiku-5-5"
+        case fable = "claude-fable-5-2", opus = "claude-opus-5-5", sonnet = "claude-sonnet-5-5", haiku = "claude-haiku-5-5"
         var id: String { rawValue }
         var label: String {
             switch self {
+            case .fable: return "Fable 5.2 (strongest, costs most)"
             case .opus: return "Opus 5.5 (best answers)"
             case .sonnet: return "Sonnet 5.5 (balanced)"
             case .haiku: return "Haiku 5.5 (fastest, cheapest)"
@@ -33,8 +34,21 @@ struct ClaudeClient {
         }
     }
 
+    enum Effort: String, CaseIterable, Identifiable {
+        case low, medium, high
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .low: return "Low (fastest)"
+            case .medium: return "Medium"
+            case .high: return "High (thinks longest)"
+            }
+        }
+    }
+
     let apiKey: String
     let model: Model
+    var effort: Effort = .low
 
     /// One request. `messages` are raw JSON-ready dictionaries (user turns, assistant content arrays, tool results).
     /// `system` is the stable part (rules) and is cached with the tools; `context` (the live digest) changes
@@ -54,7 +68,7 @@ struct ClaudeClient {
                 + (context.isEmpty ? [] as [[String: Any]] : [["type": "text", "text": context] as [String: Any]]),
             "messages": messages,
             "tools": tools,
-            "output_config": ["effort": "low"],
+            "output_config": ["effort": effort.rawValue],
         ]
         if model != .haiku {
             // if a safety classifier declines, the API retries on a suitable fallback model in the same call

@@ -86,8 +86,11 @@ struct SettingsView: View {
                     Picker("Model", selection: $chat.modelRaw) {
                         ForEach(ClaudeClient.Model.allCases) { Text($0.label).tag($0.rawValue) }
                     }
+                    Picker("Thinking", selection: $chat.effortRaw) {
+                        ForEach(ClaudeClient.Effort.allCases) { Text($0.label).tag($0.rawValue) }
+                    }
                 } header: { Text("Katrina (Dispatch)") } footer: {
-                    Text("Dispatch uses an Anthropic API key from console.anthropic.com, billed per use. Missions on your Macs use your Claude subscription there instead. The Tower never uses either.")
+                    Text("Dispatch uses an Anthropic API key from console.anthropic.com, billed per use. Higher thinking and Fable cost more; spoken questions always use Sonnet at low. Missions on your Macs use your Claude subscription there instead. The Tower never uses either.")
                 }
 
                 Section {
