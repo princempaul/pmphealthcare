@@ -323,9 +323,11 @@ def project_info(path, cfg):
                     last_commit="", last_commit_msg="")
     for readme in ("CLAUDE.md", "README.md"):
         fp = os.path.join(path, readme)
-        if os.path.exists(fp):
+        try:
             with open(fp, errors="ignore") as f:
                 text += " " + f.read(4000)
+        except OSError:      # missing, or macOS privacy blocks the read (e.g. ~/Documents)
+            pass
     info["category"] = cfg.get("project_overrides", {}).get(info["name"]) or categorize(text, cfg)
     return info
 

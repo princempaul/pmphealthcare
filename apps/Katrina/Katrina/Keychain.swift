@@ -19,6 +19,12 @@ enum Keychain {
         set { write("crew-pairing-code", newValue) }
     }
 
+    /// "salt:hash" of the NP desk PIN. Never the PIN itself.
+    static var npPin: String? {
+        get { read("np-desk-pin") }
+        set { write("np-desk-pin", newValue) }
+    }
+
     private static func read(_ account: String) -> String? {
         let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
                                 kSecAttrAccount as String: account, kSecReturnData as String: true,

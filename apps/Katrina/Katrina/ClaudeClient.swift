@@ -67,9 +67,9 @@ struct ClaudeClient {
             "system": [["type": "text", "text": system, "cache_control": ["type": "ephemeral"]] as [String: Any]]
                 + (context.isEmpty ? [] as [[String: Any]] : [["type": "text", "text": context] as [String: Any]]),
             "messages": messages,
-            "tools": tools,
             "output_config": ["effort": effort.rawValue],
         ]
+        if !tools.isEmpty { body["tools"] = tools }
         if model != .haiku {
             // if a safety classifier declines, the API retries on a suitable fallback model in the same call
             req.setValue("server-side-fallback-2026-07-01", forHTTPHeaderField: "anthropic-beta")

@@ -30,6 +30,7 @@ targets:
         LSApplicationCategoryType: public.app-category.productivity
         UIBackgroundModes: [fetch]
         NSMicrophoneUsageDescription: Katrina listens when you tap the microphone or use Talk mode, so you can speak instead of type.
+        NSFaceIDUsageDescription: Face ID opens the NP desk so only you can see it.
         NSSpeechRecognitionUsageDescription: Your words are turned into text on this device where possible, so Katrina can act on what you say.
         INAlternativeAppNames:
           - INAlternativeAppName: Katrina
