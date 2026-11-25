@@ -109,8 +109,11 @@ jobs:
         run: |
           set -o pipefail
           cd apps/Katrina
+          # the unsigned archive carries no team, so give the export the team ID (kept out of the repo)
+          cp ExportOptions.plist build/ExportOptions.plist
+          /usr/libexec/PlistBuddy -c "Add :teamID string $APPLE_TEAM_ID" build/ExportOptions.plist
           xcodebuild -exportArchive -archivePath build/Katrina.xcarchive \
-            -exportOptionsPlist ExportOptions.plist -exportPath build/export \
+            -exportOptionsPlist build/ExportOptions.plist -exportPath build/export \
             -allowProvisioningUpdates \
             -authenticationKeyPath ~/private_keys/AuthKey_${ASC_KEY_ID}.p8 \
             -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
