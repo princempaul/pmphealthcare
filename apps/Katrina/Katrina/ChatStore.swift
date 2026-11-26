@@ -47,6 +47,7 @@ final class ChatStore: ObservableObject {
     @Published var proposals: [UUID: Proposal] = [:]
     @Published var busy = false
     @Published var status = ""
+    @Published var streaming = ""      // the reply as it is being written
     @Published var modelRaw: String = UserDefaults.standard.string(forKey: "model") ?? ClaudeClient.Model.opus.rawValue {
         didSet { UserDefaults.standard.set(modelRaw, forKey: "model") }
     }
@@ -113,7 +114,19 @@ final class ChatStore: ObservableObject {
         ]
     }
 
-    func reset() { lines = []; history = []; status = ""; proposals = [:] }
+    func reset() { lines = []; history = []; status = ""; streaming = ""; proposals = [:] }
+
+    /// Once a question is fully answered, its hidden reasoning blocks are dropped from the transcript. They are
+    /// only needed while a tool loop is running, and keeping them makes later requests fail when the digest
+    /// changes or old turns are trimmed.
+    private func settle(from start: Int) {
+        guard start < history.count else { return }
+        for i in start..<history.count where history[i]["role"] as? String == "assistant" {
+            guard let blocks = history[i]["content"] as? [[String: Any]] else { continue }
+            let kept = blocks.filter { !["thinking", "redacted_thinking"].contains($0["type"] as? String ?? "") }
+            history[i]["content"] = kept.isEmpty ? [["type": "text", "text": "(no answer)"] as [String: Any]] : kept
+        }
+    }
 
     /// Long chats get expensive and slow: keep roughly the last 12 exchanges. Cuts only at a typed question,
     /// so a tool call is never separated from its result.
@@ -158,7 +171,7 @@ final class ChatStore: ObservableObject {
             lines.append(ChatLine(role: .note, text: ClaudeClient.ClientError.noKey.localizedDescription)); return
         }
         busy = true; status = "Thinking…"
-        defer { busy = false; status = "" }
+        defer { busy = false; status = ""; streaming = "" }
         // Spoken questions want speed: Sonnet unless Paul picked Haiku. Typed questions use his chosen model.
         let chosen = ClaudeClient.Model(rawValue: modelRaw) ?? .opus
         let fast = voice && (chosen == .opus || chosen == .fable)
@@ -172,7 +185,10 @@ final class ChatStore: ObservableObject {
         history.append(["role": "user", "content": q])
         do {
             for _ in 0..<8 {
-                let reply = try await client.send(system: system, context: context, messages: history, tools: tools)
+                let reply = try await client.send(system: system, context: context, messages: history, tools: tools) { [weak self] t in
+                    self?.streaming += t
+                }
+                streaming = ""
                 let content = reply["content"] as? [[String: Any]] ?? []
                 history.append(["role": "assistant", "content": content])   // unchanged, thinking blocks included
                 let text = content.compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }
@@ -188,6 +204,7 @@ final class ChatStore: ObservableObject {
                     }
                     lines.append(ChatLine(role: .katrina, text: text.isEmpty ? "(no answer)" : text))
                     if reply["stop_reason"] as? String == "max_tokens" { lines.append(ChatLine(role: .note, text: "The answer was cut short.")) }
+                    settle(from: start)
                     return
                 }
                 if !text.isEmpty { lines.append(ChatLine(role: .katrina, text: text)) }
@@ -203,6 +220,7 @@ final class ChatStore: ObservableObject {
                 }
                 history.append(["role": "user", "content": results])   // all results in one message
             }
+            settle(from: start)
             lines.append(ChatLine(role: .note, text: "Katrina stopped after several lookups. Ask more narrowly."))
         } catch {
             history.removeSubrange(start...)   // drop this question's partial turns so the transcript stays valid

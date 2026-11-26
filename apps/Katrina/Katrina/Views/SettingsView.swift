@@ -6,6 +6,7 @@ struct SettingsView: View {
     @EnvironmentObject var github: GitHubStore
     @EnvironmentObject var sites: SiteMonitor
     @EnvironmentObject var np: NPSession
+    @AppStorage("np.sources") private var npSources = ClinicAssistant.defaultSources
     @AppStorage("appearance") private var appearance = 2
     @AppStorage("sites") private var siteList = SiteMonitor.defaultList
     @AppStorage("notify") private var notify = true
@@ -113,6 +114,18 @@ struct SettingsView: View {
                     }
                 } header: { Text("NP desk login") } footer: {
                     Text("A 6-digit PIN of its own, kept on this device only. Five wrong tries in a row lock it for a while. It locks again when the app has been away.")
+                }
+
+                Section {
+                    TextField("cno.org, cps.ca, …", text: $npSources, axis: .vertical).lineLimit(3...10)
+                        .autocorrectionDisabled()
+                        #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        #endif
+                        .font(.footnote)
+                    Button("Reset to the default list") { npSources = ClinicAssistant.defaultSources }
+                } header: { Text("NP desk trusted sources") } footer: {
+                    Text("When \"Look up trusted sources\" is on, the NP desk searches only these sites and lists what it cited. Separate with commas. Each search costs about one cent plus the reading. Leave it empty to search the whole web.")
                 }
 
                 Section {

@@ -36,5 +36,18 @@ enum Privacy {
         let range = NSRange(text.startIndex..., in: text)
         return identifiers.contains { $0.firstMatch(in: text, range: range) != nil }
     }
-}
 
+    /// Details that don't name anyone but can still point to one person in a small community.
+    private static let quasi: [(NSRegularExpression, String)] = [
+        (#"\b(?-i:[A-Z][a-z]+(?:\s[A-Z][a-z]+)?\s(?:Lodge|Manor|Villa|Residence|Terrace|Gardens|Nursing Home|Retirement (?:Home|Residence|Village)|Long[- ]Term Care))\b"#, "a care home or facility name"),
+        (#"\b(?:works?|worked|employed)\s(?:at|for|with)\s(?-i:[A-Z])"#, "an employer"),
+        (#"\bage[d]?\s*:?\s*(?:9\d|1[01]\d)\b|\b(?:9\d|1[01]\d)[- ]?(?:y/?o|yrs?|years?)\b"#, "an exact age over 89"),
+        (#"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s\d{1,2}(?:st|nd|rd|th)?\b(?!\s?(?:mg|mcg|g|ml|l|units?|%|tabs?|times|days?|weeks?|months?|years?|hours?|h)\b)|\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b|\b(?:19|20)\d{2}-\d{2}-\d{2}\b"#, "a specific date"),
+    ].compactMap { p, why in (try? NSRegularExpression(pattern: p, options: [.caseInsensitive])).map { ($0, why) } }
+
+    /// The first such detail found, in plain words, or nil.
+    static func quasiIdentifier(in text: String) -> String? {
+        let range = NSRange(text.startIndex..., in: text)
+        return quasi.first { $0.0.firstMatch(in: text, range: range) != nil }?.1
+    }
+}

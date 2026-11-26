@@ -90,7 +90,7 @@ struct NPHomeView: View {
                     Label("No names, birth dates, health card numbers, addresses, phone or email. Write [patient] instead.", systemImage: "person.crop.circle.badge.xmark")
                     Label("Every draft is for your review. Nothing is signed, sent or filed from here.", systemImage: "signature")
                     Label("Chats live in memory only and vanish when the desk locks.", systemImage: "lock.shield")
-                    Label("Claude can't browse here, so confirm doses and thresholds at the source.", systemImage: "books.vertical")
+                    Label("With look-up on, answers cite your trusted sources. Still confirm doses and thresholds yourself.", systemImage: "books.vertical")
                 }
                 .font(.footnote).foregroundStyle(.secondary)
             }
@@ -125,6 +125,7 @@ struct NPAssistantView: View {
     @StateObject private var model: ClinicAssistant
     @State private var draft: String
     @State private var copied: UUID?
+    @State private var editingStyle = false
 
     init(template: NPTemplate) {
         _model = StateObject(wrappedValue: ClinicAssistant(template: template))
@@ -140,7 +141,16 @@ struct NPAssistantView: View {
                             .font(.footnote).foregroundStyle(.secondary)
                         ForEach(model.lines) { line in row(line).id(line.id) }
                         if model.busy {
-                            HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Drafting…").foregroundStyle(.secondary) }.id("busy")
+                            if model.streaming.isEmpty {
+                                HStack(spacing: 8) {
+                                    ProgressView().controlSize(.small)
+                                    Text(model.lookUp ? "Checking sources and drafting…" : "Drafting…").foregroundStyle(.secondary)
+                                }.id("busy")
+                            } else {
+                                Text(model.streaming).frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(16).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                    .id("busy")
+                            }
                         }
                     }
                     .padding(20)
@@ -149,6 +159,7 @@ struct NPAssistantView: View {
                 }
                 .scrollDismissesKeyboard(.interactively)
                 .onChange(of: model.lines.count) { _, _ in withAnimation { proxy.scrollTo(model.lines.last?.id, anchor: .bottom) } }
+                .onChange(of: model.streaming.count / 120) { _, _ in proxy.scrollTo("busy", anchor: .bottom) }
             }
             composer
         }
@@ -158,9 +169,15 @@ struct NPAssistantView: View {
         #endif
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button("Clear") { model.reset(); draft = model.template.starter }.disabled(model.lines.isEmpty || model.busy)
+                Menu {
+                    Toggle(isOn: $model.lookUp) { Label("Look up trusted sources", systemImage: "globe") }
+                    Button { editingStyle = true } label: { Label("My style for this", systemImage: "text.badge.star") }
+                    Button(role: .destructive) { model.reset(); draft = model.template.starter } label: { Label("Clear", systemImage: "trash") }
+                        .disabled(model.lines.isEmpty || model.busy)
+                } label: { Label("Options", systemImage: model.lookUp ? "globe" : "ellipsis.circle") }
             }
         }
+        .sheet(isPresented: $editingStyle) { NPStyleEditor(template: model.template) }
     }
 
     @ViewBuilder
@@ -174,6 +191,18 @@ struct NPAssistantView: View {
         case .reply:
             VStack(alignment: .leading, spacing: 10) {
                 Text(line.text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                if !line.sources.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("SOURCES").font(Theme.monoSmall).foregroundStyle(.secondary)
+                        ForEach(line.sources) { src in
+                            if let url = URL(string: src.url) {
+                                Link(destination: url) {
+                                    Label(src.title, systemImage: "link").font(.footnote).multilineTextAlignment(.leading)
+                                }
+                            }
+                        }
+                    }
+                }
                 Button {
                     Clipboard.copy(line.text)
                     copied = line.id
@@ -209,7 +238,50 @@ struct NPAssistantView: View {
     private func send() {
         let q = draft
         draft = ""
-        Task { await model.send(q, chat: chat) }
+        Task {
+            let sent = await model.send(q, chat: chat)
+            if !sent && draft.isEmpty { draft = q }
+        }
+    }
+}
+
+/// Paul's own format for one kind of document. Saved on this device and added to every draft of that kind.
+struct NPStyleEditor: View {
+    let template: NPTemplate
+    @Environment(\.dismiss) private var dismiss
+    @State private var text = ""
+    @State private var problem: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextEditor(text: $text).frame(minHeight: 260).font(.callout)
+                } header: { Text(template.title) } footer: {
+                    Text("Paste your headings, phrases and order, or an example with every patient detail taken out. Katrina follows it each time. Up to 4,000 characters.")
+                }
+                if let problem { Section { Text(problem).foregroundStyle(Theme.action) } }
+            }
+            .formStyle(.grouped)
+            .navigationTitle("My style")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        if Privacy.looksLikeIdentifier(text) {
+                            problem = "That looks like it has identifying detail (a name, date of birth, health card number, phone, email, postal code or room). Take it out, then save."
+                        } else {
+                            ClinicAssistant.setStyle(text, for: template)
+                            dismiss()
+                        }
+                    }
+                }
+            }
+            .onAppear { text = ClinicAssistant.style(for: template) }
+        }
     }
 }
 
