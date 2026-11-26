@@ -91,18 +91,17 @@ jobs:
           brew install xcodegen
           cd apps/Katrina && xcodegen generate
 
-      - name: Archive for iPhone (signed with the API key)
+      - name: Archive for iPhone (unsigned; the export step signs it)
         run: |
           set -o pipefail
           mkdir -p ~/private_keys
           printf '%s' "$ASC_KEY_P8" > ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
           cd apps/Katrina
+          # Signing here made Apple create a new development certificate on every run until the account hit its limit.
           xcodebuild archive -project Katrina.xcodeproj -scheme Katrina \
             -destination 'generic/platform=iOS' -archivePath build/Katrina.xcarchive \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath ~/private_keys/AuthKey_${ASC_KEY_ID}.p8 \
-            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee archive.log | grep -E "error:|\*\* ARCHIVE" || true
           grep -q "ARCHIVE SUCCEEDED" archive.log
 
@@ -110,8 +109,11 @@ jobs:
         run: |
           set -o pipefail
           cd apps/Katrina
+          # the unsigned archive carries no team, so give the export the team ID (kept out of the repo)
+          cp ExportOptions.plist build/ExportOptions.plist
+          /usr/libexec/PlistBuddy -c "Add :teamID string $APPLE_TEAM_ID" build/ExportOptions.plist
           xcodebuild -exportArchive -archivePath build/Katrina.xcarchive \
-            -exportOptionsPlist ExportOptions.plist -exportPath build/export \
+            -exportOptionsPlist build/ExportOptions.plist -exportPath build/export \
             -allowProvisioningUpdates \
             -authenticationKeyPath ~/private_keys/AuthKey_${ASC_KEY_ID}.p8 \
             -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
