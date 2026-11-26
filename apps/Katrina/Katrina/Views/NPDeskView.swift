@@ -1,4 +1,7 @@
 import SwiftUI
+import PhotosUI
+import ImageIO
+import UniformTypeIdentifiers
 #if os(iOS)
 import UIKit
 #else
@@ -131,6 +134,11 @@ struct NPAssistantView: View {
     @State private var draft: String
     @State private var copied: UUID?
     @State private var editingStyle = false
+    @State private var confirmAttach = false
+    @State private var pickingPDF = false
+    @State private var pickingPhoto = false
+    @State private var photo: PhotosPickerItem?
+    @State private var attachProblem: String?
 
     init(template: NPTemplate) {
         _model = StateObject(wrappedValue: ClinicAssistant(template: template))
@@ -177,12 +185,42 @@ struct NPAssistantView: View {
                 Menu {
                     Toggle(isOn: $model.lookUp) { Label("Look up trusted sources", systemImage: "globe") }
                     Button { editingStyle = true } label: { Label("My style for this", systemImage: "text.badge.star") }
+                    Button { confirmAttach = true } label: { Label("Attach a guideline or printed page", systemImage: "paperclip") }
                     Button(role: .destructive) { model.reset(); draft = model.template.starter } label: { Label("Clear", systemImage: "trash") }
                         .disabled(model.lines.isEmpty || model.busy)
                 } label: { Label("Options", systemImage: model.lookUp ? "globe" : "ellipsis.circle") }
             }
         }
         .sheet(isPresented: $editingStyle) { NPStyleEditor(template: model.template) }
+        .confirmationDialog("Reference material only", isPresented: $confirmAttach, titleVisibility: .visible) {
+            Button("PDF: it has no patient information") { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { pickingPDF = true } }
+            Button("Photo: it has no patient information") { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { pickingPhoto = true } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Attach a guideline, a blank form or a printed page. The app can't check inside a file, so never attach anything about a patient: no charts, results, referrals or completed forms.")
+        }
+        .fileImporter(isPresented: $pickingPDF, allowedContentTypes: [.pdf]) { result in
+            guard case .success(let url) = result else { return }
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url) else { attachProblem = "Couldn't read that file."; return }
+            guard data.count <= 15_000_000 else { attachProblem = "That PDF is over 15 MB. Attach the section you need."; return }
+            model.attachment = ClinicAssistant.Attachment(name: url.lastPathComponent, isPDF: true, base64: data.base64EncodedString())
+            attachProblem = nil
+        }
+        .photosPicker(isPresented: $pickingPhoto, selection: $photo, matching: .images)
+        .onChange(of: photo) { _, item in
+            guard let item else { return }
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self), let jpeg = Clipboard.jpeg(from: data, maxSide: 1568) {
+                    model.attachment = ClinicAssistant.Attachment(name: "Photo", isPDF: false, base64: jpeg.base64EncodedString())
+                    attachProblem = nil
+                } else {
+                    attachProblem = "Couldn't read that photo."
+                }
+                photo = nil
+            }
+        }
     }
 
     @ViewBuilder
@@ -200,10 +238,12 @@ struct NPAssistantView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("SOURCES").font(Theme.monoSmall).foregroundStyle(.secondary)
                         ForEach(line.sources) { src in
-                            if let url = URL(string: src.url) {
+                            if let url = src.url.flatMap(URL.init(string:)) {
                                 Link(destination: url) {
                                     Label(src.title, systemImage: "link").font(.footnote).multilineTextAlignment(.leading)
                                 }
+                            } else {
+                                Label(src.title, systemImage: "doc.text").font(.footnote).foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -224,6 +264,23 @@ struct NPAssistantView: View {
     }
 
     private var composer: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let a = model.attachment {
+                HStack(spacing: 8) {
+                    Image(systemName: a.isPDF ? "doc.richtext" : "photo").foregroundStyle(Theme.accent)
+                    Text("\(a.name) goes with your next message").font(.footnote).lineLimit(1)
+                    Spacer()
+                    Button { model.attachment = nil } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }.buttonStyle(.plain)
+                }
+            }
+            if let attachProblem { Text(attachProblem).font(.footnote).foregroundStyle(Theme.action) }
+            composerRow
+        }
+        .padding(12)
+        .background(.bar)
+    }
+
+    private var composerRow: some View {
         HStack(alignment: .bottom, spacing: 10) {
             TextField("Type or dictate", text: $draft, axis: .vertical)
                 .lineLimit(1...8).textFieldStyle(.plain)
@@ -236,8 +293,6 @@ struct NPAssistantView: View {
             .buttonStyle(.plain)
             .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.busy)
         }
-        .padding(12)
-        .background(.bar)
     }
 
     private func send() {
@@ -292,6 +347,18 @@ struct NPStyleEditor: View {
 
 /// Copies text for pasting into Jane. On iPhone it stays off other devices and expires after two minutes.
 enum Clipboard {
+    /// Shrinks any image the system can read (HEIC included) to a JPEG the API accepts.
+    static func jpeg(from data: Data, maxSide: Int) -> Data? {
+        guard let src = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let opts: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
+                                     kCGImageSourceThumbnailMaxPixelSize: maxSide]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+        let out = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(out, UTType.jpeg.identifier as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(dest, image, [kCGImageDestinationLossyCompressionQuality: 0.8] as CFDictionary)
+        return CGImageDestinationFinalize(dest) ? out as Data : nil
+    }
+
     static func copy(_ text: String) {
         #if os(iOS)
         UIPasteboard.general.setItems([[UIPasteboard.typeAutomatic: text]],
