@@ -131,6 +131,7 @@ struct TalkView: View {
         phase = .thinking
         let reply = await chat.reply(to: text, voice: true)
         answer = reply
+        guard phase == .thinking else { return }     // paused or closed while waiting: stay quiet
         phase = .speaking
         output.speak(reply) {
             if phase == .speaking { Task { await listen() } }   // hands-free: listen again
@@ -153,6 +154,7 @@ struct TalkView: View {
     }
 
     private func end() {
+        phase = .paused
         input.stop()
         output.stop()
         dismiss()

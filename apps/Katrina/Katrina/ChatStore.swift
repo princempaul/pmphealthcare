@@ -201,6 +201,7 @@ final class ChatStore: ObservableObject {
                             ["type": "tool_result", "tool_use_id": $0["id"] as? String ?? "", "content": "Not run: the reply was cut short.",
                              "is_error": true] as [String: Any]
                         }])
+                        history.append(["role": "assistant", "content": "(stopped)"])   // so the next question doesn't follow a user turn
                     }
                     lines.append(ChatLine(role: .katrina, text: text.isEmpty ? "(no answer)" : text))
                     if reply["stop_reason"] as? String == "max_tokens" { lines.append(ChatLine(role: .note, text: "The answer was cut short.")) }
@@ -220,6 +221,7 @@ final class ChatStore: ObservableObject {
                 }
                 history.append(["role": "user", "content": results])   // all results in one message
             }
+            history.append(["role": "assistant", "content": "(stopped after several lookups)"])
             settle(from: start)
             lines.append(ChatLine(role: .note, text: "Katrina stopped after several lookups. Ask more narrowly."))
         } catch {

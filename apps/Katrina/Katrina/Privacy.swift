@@ -7,7 +7,7 @@ enum Privacy {
         #"\b(19|20)\d{2}[-/](0[1-9]|1[0-2])[-/](0[1-9]|[12]\d|3[01])\b"#,          // dates (DOB)
         #"\b(DOB|MRN|HCN|OHIP)\b"#,
         #"\b(room|rm|bed)\s*#?\s*\d+[A-Z]?\b"#,
-        #"\b(Mr|Mrs|Ms|Miss)\.?\s+[A-Z][a-z]+"#,
+        #"\b(?-i:(?:Mr|Mrs|Ms|Miss)\.?\s+[A-Z][a-z]+)"#,     // case matters: "miss anything" and "300 ms today" are not names
     ].compactMap { try? NSRegularExpression(pattern: $0, options: [.caseInsensitive]) }
 
     private static let clinical = try! NSRegularExpression(

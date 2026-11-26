@@ -72,7 +72,8 @@ final class NPSession: ObservableObject {
         return false
     }
 
-    func unlockWithBiometrics() async {
+    func unlockWithBiometrics(auto: Bool = false) async {
+        if auto && skipAutoFaceID { skipAutoFaceID = false; return }
         guard hasPin, faceID, biometricsAvailable else { return }
         let ctx = LAContext()
         ctx.localizedFallbackTitle = "Use PIN"
@@ -84,7 +85,10 @@ final class NPSession: ObservableObject {
         }
     }
 
-    func lock() { unlocked = false; message = "" }
+    private var skipAutoFaceID = false
+
+    /// `manual`: Paul tapped Lock, so don't pop Face ID straight back up.
+    func lock(manual: Bool = false) { unlocked = false; message = ""; skipAutoFaceID = manual }
 
     /// Removes the login. Only reachable from Settings once the desk is open.
     func removeLogin() {

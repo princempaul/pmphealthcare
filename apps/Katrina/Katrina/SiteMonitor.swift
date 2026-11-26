@@ -48,6 +48,9 @@ final class SiteMonitor: ObservableObject {
             let (_, resp) = try await URLSession.shared.data(for: req)
             site.status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         } catch {
+            // the phone being offline says nothing about the site: leave it unchecked instead of "down"
+            let mine: [URLError.Code] = [.notConnectedToInternet, .networkConnectionLost, .dataNotAllowed, .internationalRoamingOff]
+            if let code = (error as? URLError)?.code, mine.contains(code) { return site }
             site.error = error.localizedDescription
         }
         site.ms = Int(Date().timeIntervalSince(start) * 1000)

@@ -57,6 +57,16 @@ struct ClaudeClient {
     /// message is rebuilt block for block so it can be sent back unchanged in a tool loop.
     func send(system: String, context: String = "", messages: [[String: Any]], tools: [[String: Any]],
               onText: (@MainActor (String) -> Void)? = nil) async throws -> [String: Any] {
+        do {
+            return try await request(system: system, context: context, messages: messages, tools: tools, fallback: model != .haiku, onText: onText)
+        } catch ClientError.http(400, let msg) where msg.lowercased().contains("fallback") || msg.lowercased().contains("beta") {
+            // the fallback option is a beta: if the API rejects it, the question still goes through without it
+            return try await request(system: system, context: context, messages: messages, tools: tools, fallback: false, onText: onText)
+        }
+    }
+
+    private func request(system: String, context: String, messages: [[String: Any]], tools: [[String: Any]], fallback: Bool,
+                         onText: (@MainActor (String) -> Void)?) async throws -> [String: Any] {
         var req = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
         req.httpMethod = "POST"
         req.timeoutInterval = 300
@@ -74,7 +84,7 @@ struct ClaudeClient {
         ]
         if !tools.isEmpty { body["tools"] = tools }
         if onText != nil { body["stream"] = true }
-        if model != .haiku {
+        if fallback {
             // if a safety classifier declines, the API retries on a suitable fallback model in the same call
             req.setValue("server-side-fallback-2026-07-01", forHTTPHeaderField: "anthropic-beta")
             body["fallbacks"] = "default"

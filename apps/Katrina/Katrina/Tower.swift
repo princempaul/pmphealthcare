@@ -54,7 +54,7 @@ enum TowerBoard {
         // The Macs themselves.
         for f in brain.fleet where !(f.laptop ?? false) && !f.isOnline {
             let mins = f.generatedDate.map { Int(Date().timeIntervalSince($0) / 60) } ?? 0
-            items.append(TowerItem(id: "offline-\(f.machine)-\(mins / 30)", level: .action, icon: "desktopcomputer.trianglebadge.exclamationmark",
+            items.append(TowerItem(id: "offline-\(f.machine)-\(f.generated)", level: .action, icon: "desktopcomputer.trianglebadge.exclamationmark",
                                    title: "\(f.machine) is off the radar", detail: "Its crew last checked in \(mins) min ago. Missions sent now wait until it's back.",
                                    source: "Fleet"))
         }
@@ -72,13 +72,13 @@ enum TowerBoard {
             let safe = d.safeGb ?? 0
             let top = (d.places ?? []).filter { $0.gb >= 1 }.prefix(3).map { "\($0.label) \(Int($0.gb.rounded())) GB" }.joined(separator: " · ")
             if safe >= 0.5 {
-                items.append(TowerItem(id: "disk-\(f.machine)-\(d.checked ?? "")", level: .action, icon: "externaldrive.badge.minus",
+                items.append(TowerItem(id: "disk-\(f.machine)-\(used / 5)", level: .action, icon: "externaldrive.badge.minus",
                                        title: "\(f.machine): \(String(format: "%.1f", safe)) GB of throwaway caches can go",
                                        detail: top.isEmpty ? "Xcode, simulator and download caches. They rebuild themselves." : "Biggest: \(top)",
                                        source: "Disk \(used)% full",
                                        primary: (label: "Clear caches", action: .cleanup(machine: f.machine))))
             } else if !top.isEmpty {
-                items.append(TowerItem(id: "disk-\(f.machine)-\(d.checked ?? "")", level: .watch, icon: "externaldrive",
+                items.append(TowerItem(id: "diskw-\(f.machine)-\(used / 5)", level: .watch, icon: "externaldrive",
                                        title: "\(f.machine) is \(used)% full", detail: "Biggest: \(top). Only you can decide what to delete there.",
                                        source: "Disk"))
             }
