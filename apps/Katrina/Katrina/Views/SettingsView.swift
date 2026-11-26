@@ -91,6 +91,7 @@ struct SettingsView: View {
                     Picker("Thinking", selection: $chat.effortRaw) {
                         ForEach(ClaudeClient.Effort.allCases) { Text($0.label).tag($0.rawValue) }
                     }
+                    LabeledContent("This month") { Text(Usage.summary).font(.footnote).multilineTextAlignment(.trailing) }
                 } header: { Text("Katrina (Dispatch)") } footer: {
                     Text("Dispatch uses an Anthropic API key from console.anthropic.com, billed per use. Higher thinking and Fable cost more; spoken questions always use Sonnet at low. Missions on your Macs use your Claude subscription there instead. The Tower never uses either.")
                 }

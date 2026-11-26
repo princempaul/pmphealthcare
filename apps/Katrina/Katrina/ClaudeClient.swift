@@ -87,6 +87,7 @@ struct ClaudeClient {
             let (data, resp) = try await URLSession.shared.data(for: req)
             json = try Self.decode(data, status: (resp as? HTTPURLResponse)?.statusCode ?? 0)
         }
+        Usage.record(json["usage"] as? [String: Any])
         if json["stop_reason"] as? String == "refusal" {
             throw ClientError.refused((json["stop_details"] as? [String: Any])?["category"] as? String)
         }
