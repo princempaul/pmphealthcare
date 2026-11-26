@@ -124,7 +124,8 @@ final class ClinicAssistant: ObservableObject {
         let isPDF: Bool
         let base64: String
         var block: [String: Any] {
-            isPDF ? ["type": "document", "title": name, "citations": ["enabled": true],
+            // a fixed title: a file name can carry a person's name, and it would come back in citations
+            isPDF ? ["type": "document", "title": "Attached reference", "citations": ["enabled": true], "cache_control": ["type": "ephemeral"],
                      "source": ["type": "base64", "media_type": "application/pdf", "data": base64]]
                   : ["type": "image", "source": ["type": "base64", "media_type": "image/jpeg", "data": base64]]
         }
@@ -244,6 +245,7 @@ final class ClinicAssistant: ObservableObject {
         }
         busy = true
         defer { busy = false; streaming = "" }
+        let sentAttachment = attachment
         if let a = attachment {
             history.append(["role": "user", "content": [a.block, ["type": "text", "text": q] as [String: Any]]])
             lines[lines.count - 1].text = "[\(a.name)] " + q
@@ -298,6 +300,7 @@ final class ClinicAssistant: ObservableObject {
             answer = answer.trimmingCharacters(in: .whitespacesAndNewlines)
             if answer.isEmpty {
                 history.removeLast()
+                attachment = sentAttachment
                 lines.append(Line(kind: .note, text: "Claude sent back nothing. Try again."))
             } else {
                 // later turns carry the answer as plain text only: search results aren't re-sent, which keeps it cheap
@@ -307,6 +310,7 @@ final class ClinicAssistant: ObservableObject {
             }
         } catch {
             history.removeLast()
+            attachment = sentAttachment      // so a retry carries the file again
             lines.append(Line(kind: .note, text: error.localizedDescription))
         }
         return true

@@ -57,7 +57,7 @@ struct NPLockView: View {
         .padding(28)
         .frame(maxWidth: 420)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .task { await np.unlockWithBiometrics() }
+        .task { await np.unlockWithBiometrics(auto: true) }
     }
 
     private func pinField(_ title: String, text: Binding<String>) -> some View {
@@ -106,7 +106,7 @@ struct NPHomeView: View {
             .navigationDestination(for: NPTemplate.self) { NPAssistantView(template: $0) }
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Button { np.lock() } label: { Label("Lock", systemImage: "lock.fill") }
+                    Button { np.lock(manual: true) } label: { Label("Lock", systemImage: "lock.fill") }
                 }
             }
             .sheet(isPresented: $showJane) { JaneView() }
@@ -252,7 +252,7 @@ struct NPAssistantView: View {
                     Clipboard.copy(line.text)
                     copied = line.id
                 } label: {
-                    Label(copied == line.id ? "Copied (clears in 2 minutes)" : "Copy", systemImage: copied == line.id ? "checkmark" : "doc.on.doc")
+                    Label(copied == line.id ? Clipboard.copiedLabel : "Copy", systemImage: copied == line.id ? "checkmark" : "doc.on.doc")
                         .font(.footnote.weight(.semibold))
                 }
                 .buttonStyle(.bordered)
@@ -347,6 +347,12 @@ struct NPStyleEditor: View {
 
 /// Copies text for pasting into Jane. On iPhone it stays off other devices and expires after two minutes.
 enum Clipboard {
+    #if os(iOS)
+    static let copiedLabel = "Copied (clears in 2 minutes)"
+    #else
+    static let copiedLabel = "Copied"
+    #endif
+
     /// Shrinks any image the system can read (HEIC included) to a JPEG the API accepts.
     static func jpeg(from data: Data, maxSide: Int) -> Data? {
         guard let src = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }

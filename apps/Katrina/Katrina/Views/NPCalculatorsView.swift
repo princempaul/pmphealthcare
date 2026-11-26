@@ -63,7 +63,7 @@ private struct EGFRView: View {
             NumberRow(label: "Age", unit: "years", text: $age)
             Toggle("Female", isOn: $female)
             if let v = Calc.egfr(creatinineUmol: num(cr), age: num(age), female: female) {
-                ResultRow(value: "\(Int(v.rounded())) mL/min/1.73 m²", meaning: Calc.egfrBand(v))
+                ResultRow(value: "\(Int(v.rounded())) mL/min/1.73 m²", meaning: Calc.egfrBand(v.rounded()))
             }
             Text("CKD-EPI 2021 creatinine equation, adults only.").font(.footnote).foregroundStyle(.secondary)
         }
@@ -124,8 +124,10 @@ private struct ChadsView: View {
             Toggle("Diabetes", isOn: $dm)
             Toggle("Stroke, TIA or thromboembolism", isOn: $stroke)
             Toggle("Vascular disease", isOn: $vasc)
+            if num(age) > 0 {
             ResultRow(value: "\(Calc.chadsVasc(age: num(age), female: female, chf: chf, htn: htn, diabetes: dm, stroke: stroke, vascular: vasc))",
                       meaning: "Out of 9. Use your guideline's threshold for anticoagulation.")
+            } else { Text("Enter the age to see the score.").foregroundStyle(.secondary) }
         }
         .formStyle(.grouped).navigationTitle("CHA₂DS₂-VASc")
     }

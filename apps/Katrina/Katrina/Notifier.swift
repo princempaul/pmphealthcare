@@ -37,8 +37,11 @@ enum Notifier {
             }
             UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: item.id, content: c, trigger: nil))
         }
-        seen.formUnion(actionable.map(\.id))
-        UserDefaults.standard.set(Array(seen.suffix(500)), forKey: seenKey)
+        // Remember only what is still on the board and was either notified or already known. An item that
+        // clears and comes back notifies again; one that didn't fit in this round's three gets its turn next.
+        let current = Set(actionable.filter { $0.level == .action }.map(\.id))
+        seen = seen.intersection(current).union(fresh.prefix(3).map(\.id))
+        UserDefaults.standard.set(Array(seen), forKey: seenKey)
         UNUserNotificationCenter.current().setBadgeCount(actionable.filter { $0.level == .action }.count) { _ in }
     }
 
@@ -57,7 +60,7 @@ enum Notifier {
         let c = UNMutableNotificationContent()
         do {
             c.title = "Katrina"
-            c.body = try await Dispatcher.perform(action, brain: brain, github: github) ?? "Done."
+            c.body = try await Dispatcher.perform(action, brain: brain, github: github) ?? "Nothing was done: it has changed since. Open Katrina PA."
         } catch {
             c.title = "That didn't go through"
             c.body = "\(error.localizedDescription) Open Katrina PA to try again."

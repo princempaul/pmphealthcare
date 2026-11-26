@@ -63,6 +63,7 @@ final class VoiceInput: ObservableObject {
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
+            stop()
             state = .denied("No microphone input is available.")
             return
         }
@@ -73,7 +74,7 @@ final class VoiceInput: ObservableObject {
             Task { @MainActor in self?.level = rms }
         }
         engine.prepare()
-        do { try engine.start() } catch { state = .denied("Couldn't start the microphone: \(error.localizedDescription)"); return }
+        do { try engine.start() } catch { stop(); state = .denied("Couldn't start the microphone: \(error.localizedDescription)"); return }
         state = .listening
         armSilence(first: true)
         task = recognizer.recognitionTask(with: req) { [weak self] result, error in
@@ -81,7 +82,7 @@ final class VoiceInput: ObservableObject {
             let final = result?.isFinal ?? false
             let failure = error.map { ($0 as NSError).code }
             Task { @MainActor in
-                guard let self, self.state == .listening else { return }
+                guard let self, self.state == .listening, self.request === req else { return }   // ignore a late callback from an earlier try
                 if let text, !text.isEmpty { self.transcript = text; self.armSilence() }
                 if final { self.finish(); return }
                 guard let failure else { return }
@@ -215,7 +216,7 @@ final class VoiceOutput: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     }
 
     nonisolated func speechSynthesizer(_ s: AVSpeechSynthesizer, didCancel u: AVSpeechUtterance) {
-        Task { @MainActor in self.speaking = false }
+        Task { @MainActor in if !self.synth.isSpeaking { self.speaking = false } }
     }
 
     /// Markdown and symbols read badly aloud: strip them.
