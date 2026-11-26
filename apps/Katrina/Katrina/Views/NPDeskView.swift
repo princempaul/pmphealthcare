@@ -85,6 +85,11 @@ struct NPHomeView: View {
                 Section("Notes") { ForEach(NPTemplate.notes) { link($0) } }
                 Section("Letters and email") { ForEach(NPTemplate.letters) { link($0) } }
                 Section("Ask and prepare") { ForEach(NPTemplate.other) { link($0) } }
+                Section("Calculators") {
+                    NavigationLink { NPCalculatorsView() } label: {
+                        row(icon: "function", title: "Calculators and scales", detail: "eGFR, FIB-4, BMI, CHA₂DS₂-VASc, PHQ-9, GAD-7, CIWA-Ar, COWS")
+                    }
+                }
 
                 Section {
                     Label("No names, birth dates, health card numbers, addresses, phone or email. Write [patient] instead.", systemImage: "person.crop.circle.badge.xmark")

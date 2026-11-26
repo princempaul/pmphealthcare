@@ -151,6 +151,20 @@ enum TowerBoard {
                                    tap: URL(string: s.url).map { .open($0) }))
         }
 
+        // Heartbeat: a check that silently stopped running looks the same as "all clear" unless it's called out.
+        for f in brain.fleet where f.isOnline && !(f.laptop ?? false) {
+            if let last = f.host?.brainNightly.flatMap(Date.fromBrain), Date().timeIntervalSince(last) > 36 * 3600 {
+                items.append(TowerItem(id: "beat-nightly-\(f.machine)-\(Int(Date().timeIntervalSince(last) / 86400))", level: .watch, icon: "moon.zzz",
+                                       title: "\(f.machine): the nightly check hasn't run for \(ago(last))",
+                                       detail: "Alerts from it are out of date. On the Mac: launchctl list | grep pmphealthcare", source: "Heartbeat"))
+            }
+            if let last = f.host?.brainQuick.flatMap(Date.fromBrain), Date().timeIntervalSince(last) > 3 * 3600 {
+                items.append(TowerItem(id: "beat-quick-\(f.machine)-\(Int(Date().timeIntervalSince(last) / 21600))", level: .watch, icon: "clock.badge.exclamationmark",
+                                       title: "\(f.machine): the hourly refresh hasn't run for \(ago(last))",
+                                       detail: "Project and session lists may be stale.", source: "Heartbeat"))
+            }
+        }
+
         // What the nightly check flagged.
         for a in brain.needsYou {
             items.append(TowerItem(id: "a-\(a.machine)-\(a.area)-\(a.message)", level: .action, icon: "exclamationmark.circle",

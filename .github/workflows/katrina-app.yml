@@ -13,6 +13,9 @@ on:
         default: build and upload
         options: ["build and upload", "testers only"]
 
+env:
+  XCODE: "26.6"
+
 jobs:
   build:
     if: github.event_name != 'workflow_dispatch' || inputs.step != 'testers only'
@@ -28,7 +31,9 @@ jobs:
       - name: Use the newest Xcode on the runner
         run: |
           ls -d /Applications/Xcode*.app || true
-          X=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          # Pinned: a newer Xcode can change how the whole app looks. Raise XCODE on purpose, not by accident.
+          X="/Applications/Xcode_${XCODE}.app"
+          if [ ! -d "$X" ]; then echo "::warning::Xcode ${XCODE} is gone from this runner; using the newest instead."; X=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1); fi
           [ -n "$X" ] && sudo xcode-select -s "$X"
           xcodebuild -version
 
@@ -86,7 +91,10 @@ jobs:
 
       - name: Use the newest Xcode and generate the project
         run: |
-          X=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1); [ -n "$X" ] && sudo xcode-select -s "$X"
+          # Pinned: a newer Xcode can change how the whole app looks. Raise XCODE on purpose, not by accident.
+          X="/Applications/Xcode_${XCODE}.app"
+          if [ ! -d "$X" ]; then echo "::warning::Xcode ${XCODE} is gone from this runner; using the newest instead."; X=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1); fi
+          [ -n "$X" ] && sudo xcode-select -s "$X"
           xcodebuild -version
           brew install xcodegen
           cd apps/Katrina && xcodegen generate
