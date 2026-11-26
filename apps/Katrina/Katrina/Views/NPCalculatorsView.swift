@@ -54,7 +54,8 @@ private struct ResultRow: View {
 private func num(_ s: String) -> Double { Double(s.replacingOccurrences(of: ",", with: ".")) ?? 0 }
 
 private struct EGFRView: View {
-    @State private var cr = "", age = ""
+    @State private var cr = ""
+    @State private var age = ""
     @State private var female = false
     var body: some View {
         Form {
@@ -71,7 +72,10 @@ private struct EGFRView: View {
 }
 
 private struct FIB4View: View {
-    @State private var age = "", ast = "", alt = "", plt = ""
+    @State private var age = ""
+    @State private var ast = ""
+    @State private var alt = ""
+    @State private var plt = ""
     var body: some View {
         Form {
             NumberRow(label: "Age", unit: "years", text: $age)
@@ -89,7 +93,8 @@ private struct FIB4View: View {
 }
 
 private struct BMIView: View {
-    @State private var kg = "", cm = ""
+    @State private var kg = ""
+    @State private var cm = ""
     var body: some View {
         Form {
             NumberRow(label: "Weight", unit: "kg", text: $kg)
@@ -104,7 +109,12 @@ private struct BMIView: View {
 
 private struct ChadsView: View {
     @State private var age = ""
-    @State private var female = false, chf = false, htn = false, dm = false, stroke = false, vasc = false
+    @State private var female = false
+    @State private var chf = false
+    @State private var htn = false
+    @State private var dm = false
+    @State private var stroke = false
+    @State private var vasc = false
     var body: some View {
         Form {
             NumberRow(label: "Age", unit: "years", text: $age)
