@@ -30,7 +30,13 @@ struct DispatchView: View {
                             if chat.lines.isEmpty { empty }
                             ForEach(chat.lines) { line in row(line).id(line.id) }
                             if chat.busy {
-                                HStack(spacing: 8) { ProgressView().controlSize(.small); Text(chat.status).foregroundStyle(.secondary) }.id("busy")
+                                if chat.streaming.isEmpty {
+                                    HStack(spacing: 8) { ProgressView().controlSize(.small); Text(chat.status).foregroundStyle(.secondary) }.id("busy")
+                                } else {
+                                    Text(chat.streaming).frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(16).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                        .id("busy")
+                                }
                             }
                         }
                         .padding(20)
@@ -39,6 +45,7 @@ struct DispatchView: View {
                     }
                     .scrollDismissesKeyboard(.interactively)
                     .onChange(of: chat.lines.count) { _, _ in withAnimation { proxy.scrollTo(chat.lines.last?.id, anchor: .bottom) } }
+                    .onChange(of: chat.streaming.count / 120) { _, _ in proxy.scrollTo("busy", anchor: .bottom) }
                 }
                 composer
             }

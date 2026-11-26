@@ -15,6 +15,8 @@ struct KatrinaApp: App {
 
     static let refreshTask = "ca.pmphealthcare.katrina.refresh"
 
+    init() { NotificationRouter.register() }
+
     var body: some Scene {
         WindowGroup {
             RootView()
