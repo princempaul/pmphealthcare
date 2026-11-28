@@ -33,7 +33,7 @@ jobs:
           ls -d /Applications/Xcode*.app || true
           # Pinned: a newer Xcode can change how the whole app looks. Raise XCODE on purpose, not by accident.
           X="/Applications/Xcode_${XCODE}.app"
-          if [ ! -d "$X" ]; then echo "::warning::Xcode ${XCODE} is gone from this runner; using the newest instead."; X=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1); fi
+          if [ ! -d "$X" ]; then echo "::warning::Xcode ${XCODE} is gone from this runner; using the newest instead."; X=$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -viE 'beta|candidate|_rc' | sort -V | tail -1); fi
           [ -n "$X" ] && sudo xcode-select -s "$X"
           xcodebuild -version
 
@@ -93,7 +93,7 @@ jobs:
         run: |
           # Pinned: a newer Xcode can change how the whole app looks. Raise XCODE on purpose, not by accident.
           X="/Applications/Xcode_${XCODE}.app"
-          if [ ! -d "$X" ]; then echo "::warning::Xcode ${XCODE} is gone from this runner; using the newest instead."; X=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1); fi
+          if [ ! -d "$X" ]; then echo "::warning::Xcode ${XCODE} is gone from this runner; using the newest instead."; X=$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -viE 'beta|candidate|_rc' | sort -V | tail -1); fi
           [ -n "$X" ] && sudo xcode-select -s "$X"
           xcodebuild -version
           brew install xcodegen

@@ -209,8 +209,13 @@ def load_config():
     cfg = {}
     for src in (os.path.join(BASE, "config.default.json"), os.path.join(HERE, "config.json"), CONFIG):
         if os.path.exists(src):
-            with open(src) as f:
-                cfg = _merge(cfg, json.load(f)) if cfg else json.load(f)
+            try:
+                with open(src) as f:
+                    part = json.load(f)
+            except (OSError, ValueError) as e:      # a typo in a hand edit must not stop every job
+                print("Ignoring %s: %s" % (src, e))
+                continue
+            cfg = _merge(cfg, part) if cfg else part
     if is_laptop():                      # e.g. the MacBook doesn't carry the Work drive
         cfg.update(cfg.get("laptop_overrides", {}))
     cfg["scan_roots"] = [os.path.expanduser(p) for p in cfg.get("scan_roots", [])]
@@ -219,7 +224,7 @@ def load_config():
 
 def connect():
     os.makedirs(BASE, exist_ok=True)
-    con = sqlite3.connect(DB)
+    con = sqlite3.connect(DB, timeout=120)     # the hourly and nightly runs can overlap
     con.row_factory = sqlite3.Row
     con.executescript(SCHEMA)
     if "head" not in {r[1] for r in con.execute("PRAGMA table_info(projects)")}:
@@ -304,7 +309,10 @@ def project_info(path, cfg):
                       if "/.git" not in dp and "node_modules" not in dp
                       for f in fn[:200]), default=os.path.getmtime(path))
     except Exception:
-        newest = os.path.getmtime(path)
+        try:
+            newest = os.path.getmtime(path)
+        except OSError:                             # drive ejected or blocked mid-scan
+            newest = 0
     info["last_modified"] = dt.datetime.fromtimestamp(newest).replace(microsecond=0).isoformat()
     text = info["name"]
     if is_git:
@@ -406,10 +414,13 @@ def sync_conversations(con, cfg):
     new = 0
     for root in roots:
         for fp in glob.glob(os.path.join(root, "*", "*.jsonl")):
-            mt = os.path.getmtime(fp)
-            if known.get(fp) == mt:
+            try:
+                mt = os.path.getmtime(fp)
+                if known.get(fp) == mt:
+                    continue
+                s = parse_session(fp)
+            except OSError:                         # removed or blocked while we were reading
                 continue
-            s = parse_session(fp)
             if s["messages"] == 0:
                 continue
             blob = " ".join([s["title"], s["first_user"], s["sample"], s["project_path"]])
@@ -419,7 +430,7 @@ def sync_conversations(con, cfg):
             if clinical:
                 cat = "Clinical documentation"
                 summary = ""          # never keep clinical text
-                title = s["title"] if s["title"] and not CLINICAL_WORDS.search(s["title"]) else "Clinical session (content not stored)"
+                title = "Clinical session (content not stored)"     # a title can carry a name: never keep it
             else:
                 summary = redact(" ".join(s["first_user"].split()))[:220]
                 title = redact(s["title"] or summary[:80])
@@ -666,6 +677,8 @@ def import_app_notes(con, cfg):
                 t = json.load(f)
         except Exception:
             continue
+        if not isinstance(t, dict):
+            continue
         text, topic = str(t.get("text", "")), str(t.get("topic", "") or "note")
         if not text or len(CLINICAL_WORDS.findall(topic + " " + text)) >= 3 or any(p.search(text) for p in PHI_PATTERNS[:3]):
             continue
@@ -747,7 +760,10 @@ def sync_claude_config(cfg):
             elif "r" in p and "l" not in p:
                 src, dst = p["r"], os.path.join(local, rel)
             else:
-                ml, mr = os.path.getmtime(p["l"]), os.path.getmtime(p["r"])
+                try:
+                    ml, mr = os.path.getmtime(p["l"]), os.path.getmtime(p["r"])
+                except OSError:                     # iCloud moved the file mid-run
+                    continue
                 if abs(ml - mr) > 2:
                     src, dst = (p["l"], p["r"]) if ml > mr else (p["r"], p["l"])
             if src:
@@ -819,7 +835,7 @@ def token_checks(con, cfg):
     # very long conversations re-send their whole history every turn
     since = (now() - dt.timedelta(days=7)).isoformat()
     long_n = lim.get("long_session_messages", 150)
-    rows = con.execute("SELECT title, messages FROM conversations WHERE ended >= ? AND messages > ? ORDER BY messages DESC",
+    rows = con.execute("SELECT title, messages FROM conversations WHERE ended >= ? AND messages > ? AND phi_risk=0 ORDER BY messages DESC",
                        (since, long_n)).fetchall()
     if rows:
         out.append(("INFO", "Token use", "%d Claude Code chat(s) this week ran past %d messages (longest: %d, \"%s\"). Start a new chat per topic, or /clear, to cut cost."
@@ -947,7 +963,7 @@ def verify(con, cfg):
             con.execute("DELETE FROM notes WHERE rowid=?", (r["rowid"],))
             leaks += 1
     if leaks:
-        con.execute("UPDATE conversations SET summary='' WHERE phi_risk=1")
+        con.execute("UPDATE conversations SET summary='', title='Clinical session (content not stored)' WHERE phi_risk=1")
         out.append(("ACTION", "PHI wall", "%d stored conversation line(s) matched an ID/date pattern. Clinical summaries were wiped; check `brain.py search redacted`." % leaks))
 
     return out
@@ -1117,10 +1133,13 @@ def write_report(con, alerts, counts):
     with open(path, "w") as f:
         f.write(text)
     # phone-readable copy in iCloud Drive (no PHI is ever in this file)
-    if os.path.isdir(ICLOUD):
-        dst = os.path.join(ICLOUD, "PMPBrain")
-        os.makedirs(dst, exist_ok=True)
-        shutil.copy(path, os.path.join(dst, "latest-nightly.md"))
+    try:
+        if os.path.isdir(ICLOUD):
+            dst = os.path.join(ICLOUD, "PMPBrain")
+            os.makedirs(dst, exist_ok=True)
+            shutil.copy(path, os.path.join(dst, "latest-nightly.md"))
+    except OSError as e:                            # iCloud not ready or blocked: the report on the Mac still stands
+        print("Could not copy the report to iCloud: %s" % e)
     return path
 
 
@@ -1216,6 +1235,9 @@ def cmd_brief():
         notify("PMP Brain", "Last night's check failed: %s" % (last["notes"] or "see ~/PMPBrain/logs"))
         return
     d = last["started"][:10]
+    if d < (now() - dt.timedelta(days=1)).date().isoformat():
+        notify("PMP Brain", "The nightly check didn't run last night (last run %s). In Terminal: launchctl list | grep pmphealthcare" % d)
+        return
     rows = con.execute("SELECT level, area, message FROM alerts WHERE run_date=? AND resolved=0 AND level IN ('ACTION','WATCH') ORDER BY level", (d,)).fetchall()
     if rows:
         top = rows[0]
