@@ -82,48 +82,57 @@ final class BrainStore: ObservableObject {
 
     // MARK: loading
 
+    private var loading = false
+
+    /// Files are read off the main thread: an iCloud file that isn't downloaded yet can block for seconds,
+    /// and this runs every 15 seconds while the app is open.
     func reload() async {
-        guard let folder = resolveFolder() else { return }
+        guard !loading, let folder = resolveFolder() else { return }
+        loading = true
+        defer { loading = false }
         let ok = folder.startAccessingSecurityScopedResource()
         defer { if ok { folder.stopAccessingSecurityScopedResource() } }
         folderName = folder.lastPathComponent
-        let fm = FileManager.default
-        let machinesDir = folder.appendingPathComponent("machines")
-        var loaded: [MachineSnapshot] = []
-        let files = (try? fm.contentsOfDirectory(at: machinesDir, includingPropertiesForKeys: nil)) ?? []
-        for f in files {
-            // iCloud keeps not-yet-downloaded files as ".Name.json.icloud": ask for them and pick them up next refresh
-            if f.lastPathComponent.hasSuffix(".icloud") {
-                try? fm.startDownloadingUbiquitousItem(at: f)
-                continue
-            }
-            guard f.pathExtension == "json", let data = readCoordinated(f),
-                  let snap = try? JSONDecoder().decode(MachineSnapshot.self, from: data) else { continue }
-            loaded.append(snap)
-        }
-        machines = loaded.sorted { $0.machine < $1.machine }
-        var crews: [FleetSnapshot] = []
-        let fleetDir = folder.appendingPathComponent("fleet")
-        for f in (try? fm.contentsOfDirectory(at: fleetDir, includingPropertiesForKeys: nil)) ?? [] {
-            if f.lastPathComponent.hasSuffix(".icloud") { try? fm.startDownloadingUbiquitousItem(at: f); continue }
-            guard f.pathExtension == "json" else { continue }
-            try? fm.startDownloadingUbiquitousItem(at: f)          // nudge iCloud for the newest copy
-            if let data = readCoordinated(f), let snap = try? JSONDecoder().decode(FleetSnapshot.self, from: data) { crews.append(snap) }
-        }
-        fleet = crews.sorted { ($0.laptop ?? false ? 1 : 0, $0.machine) < ($1.laptop ?? false ? 1 : 0, $1.machine) }
+        let read = await Task.detached(priority: .utility) { Self.readAll(folder) }.value
+        machines = read.machines
+        fleet = read.fleet
+        if let report = read.report { nightlyReport = report }
         autoPair(folder)
-        let report = folder.appendingPathComponent("latest-nightly.md")
-        if let data = readCoordinated(report) { nightlyReport = String(decoding: data, as: UTF8.self) }
-        error = loaded.isEmpty ? "No Mac snapshots found yet in \(folder.lastPathComponent)/machines. Run the installer on a Mac and wait for its hourly update." : nil
+        error = read.machines.isEmpty ? "No Mac snapshots found yet in \(folder.lastPathComponent)/machines. Run the installer on a Mac and wait for its hourly update." : nil
         lastLoaded = Date()
     }
 
-    private func readCoordinated(_ url: URL) -> Data? {
+    private nonisolated static func readAll(_ folder: URL) -> (machines: [MachineSnapshot], fleet: [FleetSnapshot], report: String?) {
+        let fm = FileManager.default
+        var loaded: [MachineSnapshot] = []
+        for f in (try? fm.contentsOfDirectory(at: folder.appendingPathComponent("machines"), includingPropertiesForKeys: nil)) ?? [] {
+            // iCloud keeps not-yet-downloaded files as ".Name.json.icloud": ask for them and pick them up next refresh
+            if f.lastPathComponent.hasSuffix(".icloud") { try? fm.startDownloadingUbiquitousItem(at: f); continue }
+            guard f.pathExtension == "json", let data = readFile(f),
+                  let snap = try? JSONDecoder().decode(MachineSnapshot.self, from: data) else { continue }
+            loaded.append(snap)
+        }
+        var crews: [FleetSnapshot] = []
+        for f in (try? fm.contentsOfDirectory(at: folder.appendingPathComponent("fleet"), includingPropertiesForKeys: nil)) ?? [] {
+            if f.lastPathComponent.hasSuffix(".icloud") { try? fm.startDownloadingUbiquitousItem(at: f); continue }
+            guard f.pathExtension == "json" else { continue }
+            try? fm.startDownloadingUbiquitousItem(at: f)          // nudge iCloud for the newest copy
+            if let data = readFile(f), let snap = try? JSONDecoder().decode(FleetSnapshot.self, from: data) { crews.append(snap) }
+        }
+        let report = readFile(folder.appendingPathComponent("latest-nightly.md")).map { String(decoding: $0, as: UTF8.self) }
+        return (loaded.sorted { $0.machine < $1.machine },
+                crews.sorted { ($0.laptop ?? false ? 1 : 0, $0.machine) < ($1.laptop ?? false ? 1 : 0, $1.machine) },
+                report)
+    }
+
+    private nonisolated static func readFile(_ url: URL) -> Data? {
         var out: Data?
         var err: NSError?
         NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &err) { u in out = try? Data(contentsOf: u) }
         return out
     }
+
+    private func readCoordinated(_ url: URL) -> Data? { Self.readFile(url) }
 
     // MARK: notes (written for the Macs to import; they apply the same privacy rules)
 
@@ -253,6 +262,7 @@ final class BrainStore: ObservableObject {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             let data = try JSONEncoder().encode(order.signed(with: code))
             try data.write(to: dir.appendingPathComponent("\(order.id).json"), options: .atomic)
+            OrderLog.add(kind: order.kind, machine: order.machine, about: order.project.isEmpty ? order.mission : order.project)
         } catch {
             throw OrderError.write(error.localizedDescription)
         }
@@ -276,5 +286,17 @@ final class BrainStore: ObservableObject {
         }
         if !notes.isEmpty { lines.append("DECISIONS"); lines += notes.prefix(15).map { "- \($0.created.prefix(10)) [\($0.topic)] \($0.text)" } }
         return String(lines.joined(separator: "\n").prefix(maxChars))
+    }
+}
+
+/// Every order this device sent to a Mac, newest first: what, to which Mac, when. No prompts are kept.
+enum OrderLog {
+    static var entries: [String] { UserDefaults.standard.stringArray(forKey: "orders.log") ?? [] }
+
+    static func add(kind: String, machine: String, about: String) {
+        let when = Date().formatted(date: .abbreviated, time: .shortened)
+        let what = kind.replacingOccurrences(of: "gh_", with: "").replacingOccurrences(of: "_", with: " ")
+        let tail = about.isEmpty ? "" : " · " + (about.split(separator: "/").last.map(String.init) ?? about)
+        UserDefaults.standard.set(Array((["\(when) · \(what) → \(machine)\(tail)"] + entries).prefix(100)), forKey: "orders.log")
     }
 }
