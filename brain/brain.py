@@ -875,8 +875,11 @@ def verify(con, cfg):
 
     # the _inbox lane is meant to be emptied weekly
     inbox = "/Volumes/Work/_inbox"
-    if os.path.isdir(inbox):
-        n = len([f for f in os.listdir(inbox) if not f.startswith(".")])
+    try:
+        n = len([f for f in os.listdir(inbox) if not f.startswith(".")]) if os.path.isdir(inbox) else 0
+    except OSError:      # drive locked, or macOS privacy blocks the read
+        n = 0
+    if n:
         if n > lim.get("inbox_files", 25):
             out.append(("WATCH", "Inbox (unsorted)", "%d items sitting in /Volumes/Work/_inbox. Sort them into pmp, clinic, clinical or academic." % n))
 
@@ -913,9 +916,20 @@ def verify(con, cfg):
 
     # Downloads clutter
     dl = os.path.join(HOME, "Downloads")
-    if os.path.isdir(dl):
-        old = [f for f in os.listdir(dl)
-               if not f.startswith(".") and (now().timestamp() - os.path.getmtime(os.path.join(dl, f))) > 30 * 86400]
+    old = []
+    try:
+        if os.path.isdir(dl):
+            for f in os.listdir(dl):
+                if f.startswith("."):
+                    continue
+                try:
+                    if (now().timestamp() - os.path.getmtime(os.path.join(dl, f))) > 30 * 86400:
+                        old.append(f)
+                except OSError:
+                    pass
+    except OSError:      # macOS privacy blocks ~/Downloads until python3 has Full Disk Access
+        old = []
+    if old:
         if len(old) > lim.get("downloads_old", 50):
             out.append(("INFO", "Mac", "%d files in Downloads older than 30 days. Worth a clear-out." % len(old)))
 

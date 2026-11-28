@@ -139,6 +139,19 @@ struct SettingsView: View {
                 } header: { Text("Websites to watch") } footer: { Text("Separate with commas.") }
 
                 Section {
+                    if OrderLog.entries.isEmpty {
+                        Text("No orders sent from this device yet.").foregroundStyle(.secondary)
+                    } else {
+                        NavigationLink("Orders sent (\(OrderLog.entries.count))") {
+                            List(Array(OrderLog.entries.enumerated()), id: \.offset) { _, line in Text(line).font(.footnote) }
+                                .navigationTitle("Orders sent")
+                        }
+                    }
+                } header: { Text("Decisions") } footer: {
+                    Text("Every order this device sent to a Mac: approvals, merges, missions, clean-ups. The last 100, kept on this device.")
+                }
+
+                Section {
                     Toggle("Read Dispatch replies aloud", isOn: $speakReplies)
                     LabeledContent("Voice", value: VoiceOutput.bestVoice?.name ?? "System")
                 } header: { Text("Voice") } footer: {
