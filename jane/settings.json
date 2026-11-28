@@ -2,5 +2,13 @@
   "permissions": {
     "allow": ["mcp__claude-in-chrome", "Read(~/Jane/**)"],
     "deny": ["Bash", "Write", "Edit", "NotebookEdit", "WebFetch", "WebSearch"]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__claude-in-chrome.*",
+        "hooks": [{"type": "command", "command": "/usr/bin/python3 \"$HOME/PMPBrain/jane-guard.py\""}]
+      }
+    ]
   }
 }

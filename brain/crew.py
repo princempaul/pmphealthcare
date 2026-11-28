@@ -709,6 +709,9 @@ def src_dir():
     return os.path.join(HOME, "pmp-brain-src")
 
 
+UPDATE_BRANCH = "claude/project-database-daily-agent-6ihxzr"     # the repo's default, reviewed branch
+
+
 def jane_desk_stale(src):
     """Re-run the Jane desk setup only when its rules changed or it isn't running, so a live chat isn't cut off."""
     def same(a, b):
@@ -719,7 +722,8 @@ def jane_desk_stale(src):
             return False
     running = subprocess.run(["launchctl", "list", "com.pmphealthcare.jane"], capture_output=True).returncode == 0
     return not (running and same(os.path.join(src, "jane", "CLAUDE.md"), os.path.join(HOME, "Jane", "CLAUDE.md"))
-                and same(os.path.join(src, "jane", "settings.json"), os.path.join(BASE, "jane-settings.json")))
+                and same(os.path.join(src, "jane", "settings.json"), os.path.join(BASE, "jane-settings.json"))
+                and same(os.path.join(src, "jane", "guard.py"), os.path.join(BASE, "jane-guard.py")))
 
 
 def self_update():
@@ -733,31 +737,46 @@ def self_update():
     if os.path.isdir(os.path.join(src, ".git")):
         code, dirty = git(["status", "--porcelain", "--untracked-files=no"], src)
         if not code and not dirty.strip():
-            git(["fetch", "--quiet"], src, timeout=120)
-            code, behind = git(["rev-list", "--count", "HEAD..@{u}"], src)
-            if not code and behind.strip().isdigit() and int(behind) > 0:
-                code, out = git(["merge", "--ff-only", "@{u}"], src)
-                if not code:
-                    copies = [("brain/brain.py", os.path.join(BASE, "brain.py")),
-                              ("brain/crew.py", os.path.join(BASE, "crew.py")),
-                              ("brain/katrina_local.py", os.path.join(BASE, "katrina_local.py")),
-                              ("brain/config.json", os.path.join(BASE, "config.default.json")),
-                              ("katrina/registry.md", os.path.join(BASE, "registry.md"))]
-                    copies += [(os.path.relpath(fp, src), os.path.join(HOME, ".claude", "agents", os.path.basename(fp)))
-                               for fp in glob.glob(os.path.join(src, ".claude", "agents", "katrina*.md"))]
-                    for rel, dst in copies:
-                        s_ = os.path.join(src, rel)
-                        if os.path.isfile(s_):
-                            os.makedirs(os.path.dirname(dst), exist_ok=True)
-                            shutil.copy2(s_, dst + ".new")
-                            os.replace(dst + ".new", dst)
-                    st["updated"] = now_iso()
-                    # the always-on Mac also keeps the Jane desk current (rules and service)
-                    desk = os.path.join(src, "jane-desk.sh")
-                    if not brain.is_laptop() and os.path.isfile(desk) and sys.platform == "darwin" and jane_desk_stale(src):
-                        subprocess.run(["/bin/bash", desk], capture_output=True, timeout=120)
-                else:
-                    st["error"] = clean(out, 200)
+            # Only the reviewed branch reaches the Macs. A checkout left on a work branch is moved back
+            # (it is clean, and its commits stay on that branch), so a push elsewhere never auto-installs.
+            branch = str(brain.load_config().get("update_branch") or UPDATE_BRANCH)
+            git(["fetch", "--quiet", "origin"], src, timeout=120)
+            st.pop("error", None)
+            changed = False
+            _, cur = git(["rev-parse", "--abbrev-ref", "HEAD"], src)
+            if cur.strip() != branch:
+                code, out = git(["checkout", branch], src)
+                if code:
+                    st["error"] = "Can't switch the checkout to %s: %s" % (branch, clean(out, 160))
+                changed = not code
+            if "error" not in st:
+                code, behind = git(["rev-list", "--count", "HEAD..origin/" + branch], src)
+                if not code and behind.strip().isdigit() and int(behind) > 0:
+                    code, out = git(["merge", "--ff-only", "origin/" + branch], src)
+                    if code:
+                        st["error"] = clean(out, 200)
+                    changed = changed or not code
+                elif code:
+                    st["error"] = "Can't compare with origin/%s: %s" % (branch, clean(behind, 160))
+            if changed and "error" not in st:
+                copies = [("brain/brain.py", os.path.join(BASE, "brain.py")),
+                          ("brain/crew.py", os.path.join(BASE, "crew.py")),
+                          ("brain/katrina_local.py", os.path.join(BASE, "katrina_local.py")),
+                          ("brain/config.json", os.path.join(BASE, "config.default.json")),
+                          ("katrina/registry.md", os.path.join(BASE, "registry.md"))]
+                copies += [(os.path.relpath(fp, src), os.path.join(HOME, ".claude", "agents", os.path.basename(fp)))
+                           for fp in glob.glob(os.path.join(src, ".claude", "agents", "katrina*.md"))]
+                for rel, dst in copies:
+                    s_ = os.path.join(src, rel)
+                    if os.path.isfile(s_):
+                        os.makedirs(os.path.dirname(dst), exist_ok=True)
+                        shutil.copy2(s_, dst + ".new")
+                        os.replace(dst + ".new", dst)
+                st["updated"] = now_iso()
+                # the always-on Mac also keeps the Jane desk current (rules and service)
+                desk = os.path.join(src, "jane-desk.sh")
+                if not brain.is_laptop() and os.path.isfile(desk) and sys.platform == "darwin" and jane_desk_stale(src):
+                    subprocess.run(["/bin/bash", desk], capture_output=True, timeout=120)
         _, head = git(["rev-parse", "--short", "HEAD"], src)
         st["version"] = head.strip()
     write_json(UPDATE_STATE, st)
