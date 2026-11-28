@@ -60,7 +60,7 @@ touch "$HOME/.zshrc"
 printf '#!/bin/bash\nexec /usr/bin/python3 "$HOME/PMPBrain/katrina_local.py" "$@"\n' > "$DEST/bin/katrina-local"
 chmod +x "$DEST/bin/katrina-local"
 grep -q "PMPBrain/bin/katrina-local" "$HOME/.zshrc" || printf 'alias katrina-local="$HOME/PMPBrain/bin/katrina-local"  # Katrina on a local model\n' >> "$HOME/.zshrc"
-grep -q "PMPBrain/bin/katrina" "$HOME/.zshrc" || printf '\nalias katrina="$HOME/PMPBrain/bin/katrina"  # Personal Assistant Katrina\n' >> "$HOME/.zshrc"
+grep -q 'alias katrina=' "$HOME/.zshrc" || printf '\nalias katrina="$HOME/PMPBrain/bin/katrina"  # Personal Assistant Katrina\n' >> "$HOME/.zshrc"
 if command -v claude >/dev/null 2>&1 || [ -x "$HOME/.local/bin/claude" ]; then
   echo "Katrina installed. Open a new Terminal window and type: katrina"
 else
@@ -96,7 +96,7 @@ elif read -r -p "Wake the iMac every night at 23:25 for the check? [Y/n] " ans &
 fi
 
 echo "Running the first check now (takes under a minute)..."
-/usr/bin/python3 "$DEST/brain.py" nightly
+/usr/bin/python3 "$DEST/brain.py" nightly || echo "The first check hit a problem (see above). Setup continues."
 /usr/bin/python3 "$DEST/brain.py" status
 /usr/bin/python3 "$DEST/brain.py" machines
 echo

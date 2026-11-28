@@ -8,6 +8,7 @@ DESK="$HOME/Jane"
 mkdir -p "$DESK" "$HOME/PMPBrain/logs"
 cp "$SRC/jane/CLAUDE.md" "$DESK/CLAUDE.md"
 cp "$SRC/jane/settings.json" "$HOME/PMPBrain/jane-settings.json"     # outside ~/Jane, so the session can't change it
+cp "$SRC/jane/guard.py" "$HOME/PMPBrain/jane-guard.py"              # keeps the browser on Jane's own site
 if [ -n "${1:-}" ]; then echo "$1" > "$DESK/jane-url.txt"; fi
 CLAUDE_BIN=""
 for c in "$(command -v claude 2>/dev/null)" "$HOME/.local/bin/claude" /opt/homebrew/bin/claude /usr/local/bin/claude; do

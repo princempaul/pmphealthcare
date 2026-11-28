@@ -58,7 +58,8 @@ LOOK_TOOLS = ["Read", "Grep", "Glob", "WebSearch", "WebFetch",
               "Bash(git status:*)", "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)",
               "Bash(git branch:*)", "Bash(ls:*)",
               "Bash(python3 ~/PMPBrain/brain.py:*)", "Bash(python3 %s/PMPBrain/brain.py:*)" % HOME]
-WORK_TOOLS = LOOK_TOOLS + ["Edit", "Write", "NotebookEdit", "Bash(git add:*)", "Bash(git commit:*)",
+# a mission that can edit and run tests can run code, so it gets no way to send anything out
+WORK_TOOLS = [t for t in LOOK_TOOLS if t not in ("WebFetch", "WebSearch")] + ["Edit", "Write", "NotebookEdit", "Bash(git add:*)", "Bash(git commit:*)",
                            "Bash(npm test:*)", "Bash(npm run test:*)", "Bash(npm run build:*)",
                            "Bash(npm run lint:*)", "Bash(npx tsc:*)", "Bash(python3 -m pytest:*)",
                            "Bash(python3 -m py_compile:*)"]
@@ -198,7 +199,7 @@ def known_projects():
     try:
         con = brain.connect()
         rows = {os.path.realpath(r["path"]): (r["name"], r["kind"], r["remote"]) for r in con.execute(
-            "SELECT path, name, kind, remote FROM projects WHERE active=1")}
+            "SELECT path, name, kind, remote FROM projects WHERE active=1 AND IFNULL(category,'')!='Clinical documentation'")}
         con.close()
         return rows
     except Exception:
@@ -213,8 +214,20 @@ def start_claude(m, prompt, resume=False):
     d = mission_dir(m["id"])
     os.makedirs(d, exist_ok=True)
     tools = WORK_TOOLS if m["mode"] == "work" else LOOK_TOOLS
+    if prompt.startswith("-"):
+        prompt = " " + prompt                       # or the CLI reads it as a flag
     cmd = [exe, "-p", prompt, "--output-format", "json", "--permission-mode", "dontAsk",
            "--allowedTools"] + tools + ["--append-system-prompt", MISSION_RULES]
+    # Off limits to every mission: the order-signing key, other sessions' transcripts, and the Jane desk.
+    fence = os.path.join(BASE, "mission-settings.json")
+    try:
+        write_json(fence, {"permissions": {"deny": [
+            "Read(~/PMPBrain/crew.key)", "Edit(~/PMPBrain/**)", "Write(~/PMPBrain/**)",
+            "Read(~/.claude/projects/**)", "Read(~/Jane/**)", "Edit(~/Jane/**)", "Write(~/Jane/**)",
+            "Read(/Volumes/Work/clinical/**)", "Edit(~/.claude/**)", "Write(~/.claude/**)"]}})
+        cmd += ["--settings", fence]
+    except OSError:
+        pass
     if os.path.exists(os.path.join(HOME, ".claude", "agents", "katrina.md")):
         cmd += ["--agent", "katrina"]
     if resume:
@@ -250,7 +263,7 @@ def new_mission(order, projects):
     elif m["mode"] == "work" and kind != "git":
         m.update(state="failed", error="Work missions need a git project, so the change sits on its own branch.")
     elif m["mode"] == "work":
-        short = m["id"][:8].lower()
+        short = re.sub(r"[^a-z0-9]", "", str(m["id"]).lower())[:8] or "mission"
         wt = os.path.join(WORKTREES, short)
         _, base = git(["rev-parse", "HEAD"], path)
         code, out = git(["worktree", "add", "-b", "katrina/" + short, wt, "HEAD"], path)
@@ -338,6 +351,8 @@ def check_running():
 
 
 def kill(pid):
+    if not pid or pid <= 1:        # 0 would signal this crew's own process group
+        return
     try:
         os.killpg(pid, signal.SIGTERM)
     except OSError:
@@ -451,7 +466,7 @@ def take_orders(shared, me, laptop):
             age = time.time() - brain.dt.datetime.fromisoformat(str(order["created"])[:19]).timestamp()
         except Exception:
             age = ORDER_MAX_AGE + 1
-        if age > ORDER_MAX_AGE:
+        if age > ORDER_MAX_AGE or age < -600:           # too old, or dated in the future
             continue
         seen.add(oid)
         if projects is None:
@@ -575,6 +590,8 @@ def gh_order(order):
     kind, slug = order.get("kind"), str(order.get("project", ""))
     if not re.match(r"^[\w.-]+/[\w.-]+$", slug):
         return
+    if kind in ("gh_merge", "gh_rerun") and not str(order.get("mission", "")).isdigit():
+        return
     if not token:
         gh_result(kind, False, "This Mac has no GitHub login stored for git.")
         return
@@ -692,6 +709,9 @@ def src_dir():
     return os.path.join(HOME, "pmp-brain-src")
 
 
+UPDATE_BRANCH = "claude/project-database-daily-agent-6ihxzr"     # the repo's default, reviewed branch
+
+
 def jane_desk_stale(src):
     """Re-run the Jane desk setup only when its rules changed or it isn't running, so a live chat isn't cut off."""
     def same(a, b):
@@ -702,7 +722,8 @@ def jane_desk_stale(src):
             return False
     running = subprocess.run(["launchctl", "list", "com.pmphealthcare.jane"], capture_output=True).returncode == 0
     return not (running and same(os.path.join(src, "jane", "CLAUDE.md"), os.path.join(HOME, "Jane", "CLAUDE.md"))
-                and same(os.path.join(src, "jane", "settings.json"), os.path.join(BASE, "jane-settings.json")))
+                and same(os.path.join(src, "jane", "settings.json"), os.path.join(BASE, "jane-settings.json"))
+                and same(os.path.join(src, "jane", "guard.py"), os.path.join(BASE, "jane-guard.py")))
 
 
 def self_update():
@@ -716,31 +737,46 @@ def self_update():
     if os.path.isdir(os.path.join(src, ".git")):
         code, dirty = git(["status", "--porcelain", "--untracked-files=no"], src)
         if not code and not dirty.strip():
-            git(["fetch", "--quiet"], src, timeout=120)
-            code, behind = git(["rev-list", "--count", "HEAD..@{u}"], src)
-            if not code and behind.strip().isdigit() and int(behind) > 0:
-                code, out = git(["merge", "--ff-only", "@{u}"], src)
-                if not code:
-                    copies = [("brain/brain.py", os.path.join(BASE, "brain.py")),
-                              ("brain/crew.py", os.path.join(BASE, "crew.py")),
-                              ("brain/katrina_local.py", os.path.join(BASE, "katrina_local.py")),
-                              ("brain/config.json", os.path.join(BASE, "config.default.json")),
-                              ("katrina/registry.md", os.path.join(BASE, "registry.md"))]
-                    copies += [(os.path.relpath(fp, src), os.path.join(HOME, ".claude", "agents", os.path.basename(fp)))
-                               for fp in glob.glob(os.path.join(src, ".claude", "agents", "katrina*.md"))]
-                    for rel, dst in copies:
-                        s_ = os.path.join(src, rel)
-                        if os.path.isfile(s_):
-                            os.makedirs(os.path.dirname(dst), exist_ok=True)
-                            shutil.copy2(s_, dst + ".new")
-                            os.replace(dst + ".new", dst)
-                    st["updated"] = now_iso()
-                    # the always-on Mac also keeps the Jane desk current (rules and service)
-                    desk = os.path.join(src, "jane-desk.sh")
-                    if not brain.is_laptop() and os.path.isfile(desk) and sys.platform == "darwin" and jane_desk_stale(src):
-                        subprocess.run(["/bin/bash", desk], capture_output=True, timeout=120)
-                else:
-                    st["error"] = clean(out, 200)
+            # Only the reviewed branch reaches the Macs. A checkout left on a work branch is moved back
+            # (it is clean, and its commits stay on that branch), so a push elsewhere never auto-installs.
+            branch = str(brain.load_config().get("update_branch") or UPDATE_BRANCH)
+            git(["fetch", "--quiet", "origin"], src, timeout=120)
+            st.pop("error", None)
+            changed = False
+            _, cur = git(["rev-parse", "--abbrev-ref", "HEAD"], src)
+            if cur.strip() != branch:
+                code, out = git(["checkout", branch], src)
+                if code:
+                    st["error"] = "Can't switch the checkout to %s: %s" % (branch, clean(out, 160))
+                changed = not code
+            if "error" not in st:
+                code, behind = git(["rev-list", "--count", "HEAD..origin/" + branch], src)
+                if not code and behind.strip().isdigit() and int(behind) > 0:
+                    code, out = git(["merge", "--ff-only", "origin/" + branch], src)
+                    if code:
+                        st["error"] = clean(out, 200)
+                    changed = changed or not code
+                elif code:
+                    st["error"] = "Can't compare with origin/%s: %s" % (branch, clean(behind, 160))
+            if changed and "error" not in st:
+                copies = [("brain/brain.py", os.path.join(BASE, "brain.py")),
+                          ("brain/crew.py", os.path.join(BASE, "crew.py")),
+                          ("brain/katrina_local.py", os.path.join(BASE, "katrina_local.py")),
+                          ("brain/config.json", os.path.join(BASE, "config.default.json")),
+                          ("katrina/registry.md", os.path.join(BASE, "registry.md"))]
+                copies += [(os.path.relpath(fp, src), os.path.join(HOME, ".claude", "agents", os.path.basename(fp)))
+                           for fp in glob.glob(os.path.join(src, ".claude", "agents", "katrina*.md"))]
+                for rel, dst in copies:
+                    s_ = os.path.join(src, rel)
+                    if os.path.isfile(s_):
+                        os.makedirs(os.path.dirname(dst), exist_ok=True)
+                        shutil.copy2(s_, dst + ".new")
+                        os.replace(dst + ".new", dst)
+                st["updated"] = now_iso()
+                # the always-on Mac also keeps the Jane desk current (rules and service)
+                desk = os.path.join(src, "jane-desk.sh")
+                if not brain.is_laptop() and os.path.isfile(desk) and sys.platform == "darwin" and jane_desk_stale(src):
+                    subprocess.run(["/bin/bash", desk], capture_output=True, timeout=120)
         _, head = git(["rev-parse", "--short", "HEAD"], src)
         st["version"] = head.strip()
     write_json(UPDATE_STATE, st)
@@ -813,7 +849,11 @@ def clear_caches():
         if not p.startswith(HOME + os.sep) or not os.path.isdir(p):
             continue
         gb = du_gb(path, 120)
-        for entry in os.listdir(p):                   # empty the folder, keep the folder itself
+        try:
+            entries = os.listdir(p)
+        except OSError:
+            continue
+        for entry in entries:                         # empty the folder, keep the folder itself
             fp = os.path.join(p, entry)
             try:
                 if os.path.isdir(fp) and not os.path.islink(fp):
@@ -827,7 +867,8 @@ def clear_caches():
             done.append(label)
     # old Katrina worktrees for missions that are finished
     for m in all_missions():
-        if m.get("branch") and m.get("state") in ("discarded", "closed", "pushed", "failed", "stopped") \
+        # failed and stopped missions keep their worktree: it may hold work Paul wants to look at
+        if m.get("branch") and m.get("state") in ("discarded", "closed", "pushed") \
                 and os.path.isdir(m.get("cwd", "")) and m["cwd"].startswith(WORKTREES):
             repo = os.path.realpath(os.path.expanduser(m["project"]))
             git(["worktree", "remove", "--force", m["cwd"]], repo)
@@ -889,7 +930,10 @@ def sessions(cfg, mission_sids):
     for mt, fp in sorted(files, reverse=True)[:40]:
         c = cache.get(fp)
         if not c or c.get("mtime") != mt or c.get("v") != 2:
-            s = brain.parse_session(fp)
+            try:
+                s = brain.parse_session(fp)
+            except OSError:
+                continue
             blob = " ".join([s["title"], s["first_user"], s["sample"], s["project_path"]])
             cat = brain.categorize(blob, cfg)
             clinical = (cat == "Clinical documentation" or len(brain.CLINICAL_WORDS.findall(blob)) >= 4
@@ -987,19 +1031,28 @@ def cmd_tick():
         return 0                                   # the previous tick is still going
     cfg = brain.load_config()
     shared = brain.shared_dir(cfg)
-    if not shared:
-        print("No shared folder (iCloud Drive) on this Mac.")
-        return 1
     me, laptop = brain.machine_name(), brain.is_laptop()
-    pairing(shared, me, laptop)
-    take_orders(shared, me, laptop)
-    check_running()
-    start_queued()
-    export_fleet(shared, me, laptop, cfg)
-    try:
-        self_update()
-    except Exception as e:                 # an update problem must never stop the crew
-        print("update check failed: %s" % e)
+
+    def stage(name, fn, *args):
+        # One failing stage must not stop the rest: above all, running missions still get
+        # reaped and the self-update still runs, so a bad release can repair itself.
+        try:
+            fn(*args)
+        except Exception as e:
+            print("%s failed: %s: %s" % (name, type(e).__name__, e))
+
+    if shared:
+        stage("pairing", pairing, shared, me, laptop)
+        stage("orders", take_orders, shared, me, laptop)
+    stage("check", check_running)
+    stage("start", start_queued)
+    if shared:
+        stage("fleet", export_fleet, shared, me, laptop, cfg)
+    else:
+        print("No shared folder (iCloud Drive) on this Mac.")
+    stage("update", self_update)
+    if not shared:
+        return 1
     return 0
 
 
